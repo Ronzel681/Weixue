@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import useStore from '../stores/gradingStore';
 import * as api from '../api/client';
 import { avgRating } from '../utils/ratings';
@@ -42,8 +42,22 @@ export default function GradingPage() {
     }
   }, [courseId]);
 
-  const student = students[currentStudentIdx];
-  if (!student) return <div className="text-slate-400 py-10 text-center">暂无学生数据</div>;
+  // Only show students who have at least one answered topic — an empty course
+  // should look empty in the evaluator.
+  const visibleStudents = students.filter(st => {
+    const ss = responses[st.id] || [];
+    return ss.some(r => r.raw_text && r.raw_text.trim());
+  });
+  if (visibleStudents.length === 0) {
+    return (
+      <div className="text-slate-400 py-16 text-center">
+        <div className="text-sm">暂无作答数据</div>
+        <div className="text-xs mt-1">请先在「管理 → 录音录入」上传录音或粘贴转写文本</div>
+      </div>
+    );
+  }
+  const safeIdx = Math.min(currentStudentIdx, visibleStudents.length - 1);
+  const student = visibleStudents[safeIdx];
 
   const resps = responses[student.id] || [];
   const respMap = {};
@@ -71,7 +85,7 @@ export default function GradingPage() {
       {/* ── Student List ──────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 text-sm font-semibold text-slate-600">学生列表</div>
-        {students.map((st, i) => {
+        {visibleStudents.map((st, i) => {
           const ss = responses[st.id] || [];
           const sm = {};
           ss.forEach(r => { sm[r.topic_id] = r; });
@@ -103,7 +117,7 @@ export default function GradingPage() {
           );
         })}
         <div className="px-4 py-3 bg-slate-50 border-t border-slate-200">
-          <div className="text-[11px] text-slate-500 mb-1">全班统计（{students.length}人）</div>
+          <div className="text-[11px] text-slate-500 mb-1">全班统计（{visibleStudents.length}人有作答）</div>
         </div>
       </div>
 
@@ -199,6 +213,12 @@ export default function GradingPage() {
                     <span className="text-sm font-semibold text-slate-800">辩题{t.order}</span>
                     <span className="text-xs text-slate-500 truncate">{t.title}</span>
                     <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">{t.topic_type}</span>
+                    {resp?.source === 'audio' && (
+                      <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">音频</span>
+                    )}
+                    {resp?.source === 'asr' && (
+                      <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">妙记</span>
+                    )}
                     {isReviewed && (
                       <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">已评</span>
                     )}
@@ -262,7 +282,10 @@ export default function GradingPage() {
                   {/* Student text + AI analysis */}
                   <div className="mt-3 grid grid-cols-2 gap-4">
                     <div>
-                      <div className="text-xs font-medium text-slate-500 mb-1.5">学生作答（原始）</div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="text-xs font-medium text-slate-500">学生作答（原始）</div>
+                        <AudioUploader courseId={courseId} student={student} topic={t} />
+                      </div>
                       <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900 min-h-[60px] leading-relaxed">
                         {resp?.raw_text || '（无作答内容）'}
                       </div>
@@ -323,14 +346,14 @@ export default function GradingPage() {
         {/* Navigation */}
         <div className="flex justify-between items-center">
           <button
-            onClick={() => { if (currentStudentIdx > 0) { setStudentIdx(currentStudentIdx - 1); setExpandedTopic(null); } }}
-            disabled={currentStudentIdx === 0}
+            onClick={() => { if (safeIdx > 0) { setStudentIdx(safeIdx - 1); setExpandedTopic(null); } }}
+            disabled={safeIdx === 0}
             className="px-5 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm disabled:text-slate-300 disabled:cursor-default cursor-pointer"
           >← 上一位</button>
-          <span className="text-sm text-slate-400">{currentStudentIdx + 1} / {students.length}</span>
+          <span className="text-sm text-slate-400">{safeIdx + 1} / {visibleStudents.length}</span>
           <button
-            onClick={() => { if (currentStudentIdx < students.length - 1) { setStudentIdx(currentStudentIdx + 1); setExpandedTopic(null); } }}
-            disabled={currentStudentIdx === students.length - 1}
+            onClick={() => { if (safeIdx < visibleStudents.length - 1) { setStudentIdx(safeIdx + 1); setExpandedTopic(null); } }}
+            disabled={safeIdx === visibleStudents.length - 1}
             className="px-5 py-2 rounded-lg border border-slate-200 bg-white text-slate-600 text-sm disabled:text-slate-300 disabled:cursor-default cursor-pointer"
           >下一位 →</button>
         </div>
@@ -518,6 +541,54 @@ function TeacherPanel({ topic, response, suggestedTags, teacherTags, allTags, re
           {saving ? '保存中...' : saved ? '已保存' : '确认评分'}
         </button>
       </div>
+    </div>
+  );
+}
+
+/* ── Audio Uploader (ASR pipeline, independent of Feishu Minutes) ─────── */
+function AudioUploader({ courseId, student, topic }) {
+  const { loadCourse } = useStore();
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setStatus('上传并转写中...');
+    try {
+      await api.importAudio(courseId, student.id, topic.id, file);
+      setStatus('转写完成，已写入作答 ✓');
+      await loadCourse(courseId);
+    } catch (err) {
+      setStatus(`转写失败：${err?.response?.data?.detail || err?.message || '未知错误'}`);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.amr,.wma,.flac"
+        className="hidden"
+        onChange={handleFile}
+      />
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={uploading}
+        className={`text-[11px] px-2.5 py-1 rounded-md border font-medium transition-colors cursor-pointer
+          ${uploading
+            ? 'border-indigo-200 bg-indigo-50 text-indigo-500'
+            : 'border-indigo-200 bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}
+      >
+        {uploading ? '转写中...' : '🎙️ 上传音频'}
+      </button>
+      {status && <span className="text-[11px] text-slate-500">{status}</span>}
     </div>
   );
 }

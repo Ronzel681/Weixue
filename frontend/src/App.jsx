@@ -1,12 +1,14 @@
 import { useEffect } from 'react';
 import useStore from './stores/gradingStore';
 import GradingPage from './pages/GradingPage';
+import ManagementPage from './pages/ManagementPage';
 import CommentsPage from './pages/CommentsPage';
 import PrepPage from './pages/PrepPage';
 import ReportPage from './pages/ReportPage';
 import LibraryPage from './pages/LibraryPage';
 
 const TABS = [
+  { key: 'manage',   label: '管理',     icon: '🗂️' },
   { key: 'grading',  label: '智能评估', icon: '🧠' },
   { key: 'comments', label: '评语生成', icon: '💬' },
   { key: 'prep',     label: '备课辅助', icon: '📋' },
@@ -15,6 +17,7 @@ const TABS = [
 ];
 
 const TAB_DESC = {
+  manage:   '按真实备课流程录入班级数据：先辩题、再学生、后录音，三个子页互不干扰。',
   grading:  'AI已完成多维度认知评估。每题按维度给出A/B/C/D等级，请逐份审阅并修改。',
   comments: '基于您的评分和批注，AI生成评语草稿。请编辑后发送给学生。',
   prep:     '基于您确认的评估数据，AI按维度薄弱项整理讲评建议。',
@@ -25,7 +28,7 @@ const TAB_DESC = {
 const TIER_LABEL = { basic: '低年级', developing: '中年级', advancing: '高年级' };
 
 export default function App() {
-  const { course, currentTab, setTab, loading, assessing, assessmentProgress, loadAllCourses, runAssessment, resetAll } = useStore();
+  const { course, courses, currentTab, setTab, loading, assessing, assessmentProgress, loadAllCourses, selectCourse, createCourse, runAssessment, resetAll } = useStore();
 
   useEffect(() => { loadAllCourses(); }, []);
 
@@ -51,6 +54,14 @@ export default function App() {
     );
   }
 
+  const handleCreateCourse = async () => {
+    const title = window.prompt('班级标题（如：动物应该养在动物园吗？）');
+    if (!title) return;
+    const class_name = window.prompt('班级名称（如：思辨提升班）') || title;
+    const grade_level = Math.max(1, Math.min(7, parseInt(window.prompt('目标年级（1-7）', '4') || '4', 10) || 4));
+    await createCourse({ title, class_name, grade_level });
+  };
+
   return (
     <div className="min-h-screen bg-slate-100">
       {/* ── Header ─────────────────────────────────────── */}
@@ -60,9 +71,22 @@ export default function App() {
             <span className="bg-indigo-100 text-indigo-700 text-xs font-bold px-2 py-1 rounded">DEMO</span>
             <h1 className="text-lg font-bold text-slate-900 m-0">维学思辨星 · 少儿思辨能力评估系统</h1>
           </div>
-          <div className="text-right text-xs text-slate-400">
-            <div>{course.class_name} · {course.title}</div>
-            <div className="text-slate-300">教师端</div>
+          <div className="flex items-center gap-2">
+            <select
+              value={course.id}
+              onChange={e => selectCourse(parseInt(e.target.value, 10))}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-1 focus:ring-indigo-300 cursor-pointer"
+            >
+              {courses.map(c => (
+                <option key={c.id} value={c.id}>{c.class_name} · {c.title}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleCreateCourse}
+              className="text-xs border border-indigo-200 bg-indigo-50 text-indigo-600 rounded-lg px-2.5 py-1.5 cursor-pointer hover:bg-indigo-100 transition-colors"
+            >
+              ＋ 新建班级
+            </button>
           </div>
         </div>
       </header>
@@ -147,6 +171,7 @@ export default function App() {
 
       {/* ── Content ────────────────────────────────────── */}
       <main className="max-w-7xl mx-auto px-6 pb-10">
+        {currentTab === 'manage'   && <ManagementPage />}
         {currentTab === 'grading'  && <GradingPage />}
         {currentTab === 'comments' && <CommentsPage />}
         {currentTab === 'prep'     && <PrepPage />}

@@ -11,19 +11,47 @@ const api = axios.create({ baseURL: '/api' });
 // ── Courses ─────────────────────────────────────────────
 export const getCourses = (...a) => _isDemo ? _demo.getCourses(...a) : api.get('/courses').then(r => r.data);
 export const getCourse = (...a) => _isDemo ? _demo.getCourse(...a) : api.get(`/courses/${a[0]}`).then(r => r.data);
+export const createCourse = (...a) => _isDemo ? _demo.createCourse(...a) : api.post('/courses', a[0]).then(r => r.data);
 
 // ── Topics ──────────────────────────────────────────────
 export const getTopics = (...a) => _isDemo ? _demo.getTopics(...a) : api.get(`/courses/${a[0]}/topics`).then(r => r.data);
+export const createTopic = (...a) => _isDemo ? _demo.createTopic(...a) :
+  api.post(`/courses/${a[0]}/topics`, a[1]).then(r => r.data);
+export const updateTopic = (...a) => _isDemo ? _demo.updateTopic(...a) :
+  api.put(`/topics/${a[0]}`, a[1]).then(r => r.data);
+export const deleteTopic = (...a) => _isDemo ? _demo.deleteTopic(...a) :
+  api.delete(`/topics/${a[0]}`).then(r => r.data);
 
 // ── Students ────────────────────────────────────────────
 export const getStudents = (...a) => _isDemo ? _demo.getStudents(...a) : api.get(`/courses/${a[0]}/students`).then(r => r.data);
+export const createStudentsBatch = (...a) => _isDemo ? _demo.createStudentsBatch(...a) :
+  api.post(`/courses/${a[0]}/students/batch`, { students: a[1] }).then(r => r.data);
+export const updateStudent = (...a) => _isDemo ? _demo.updateStudent(...a) :
+  api.put(`/students/${a[0]}`, a[1]).then(r => r.data);
+export const deleteStudent = (...a) => _isDemo ? _demo.deleteStudent(...a) :
+  api.delete(`/students/${a[0]}`).then(r => r.data);
 
 // ── Responses ───────────────────────────────────────────
 export const getResponses = (...a) => _isDemo ? _demo.getResponses(...a) :
   api.get(`/courses/${a[0]}/responses`, { params: a[1] ? { student_id: a[1] } : {} }).then(r => r.data);
 export const getResponse = (...a) => _isDemo ? _demo.getResponse(...a) : api.get(`/responses/${a[0]}`).then(r => r.data);
+export const deleteResponse = (...a) => _isDemo ? _demo.deleteResponse(...a) :
+  api.delete(`/responses/${a[0]}`).then(r => r.data);
 export const reviewResponse = (...a) => _isDemo ? _demo.reviewResponse(...a) :
   api.post(`/responses/${a[0]}/review`, a[1]).then(r => r.data);
+
+// ── Audio import (ASR pipeline) ──────────────────────────
+export const importAudio = (courseId, studentId, topicId, file) => {
+  if (_isDemo) return _demo.importAudio(courseId, studentId, topicId, file);
+  const fd = new FormData();
+  fd.append('student_id', studentId);
+  fd.append('topic_id', topicId);
+  fd.append('file', file);
+  return api.post(`/courses/${courseId}/audio/import`, fd).then(r => r.data);
+};
+export const importText = (courseId, studentId, topicId, text) => _isDemo
+  ? _demo.importText(courseId, studentId, topicId, text)
+  : api.post(`/courses/${courseId}/responses/text`, { student_id: studentId, topic_id: topicId, text }).then(r => r.data);
 
 // ── Assessment ──────────────────────────────────────────
 export const assessCourse = (...a) => _isDemo ? _demo.assessCourse(...a) : api.post(`/courses/${a[0]}/assess`).then(r => r.data);

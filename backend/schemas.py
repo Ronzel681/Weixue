@@ -38,6 +38,15 @@ class DebateTopicBase(BaseModel):
 class DebateTopicCreate(DebateTopicBase):
     rubric_template_id: Optional[int] = None
 
+class DebateTopicUpdate(BaseModel):
+    title: Optional[str] = None
+    topic_type: Optional[str] = None
+    cognitive_tier: Optional[str] = None
+    stimulus_material: Optional[str] = None
+    reference_arguments: Optional[list[str]] = None
+    max_score: Optional[int] = None
+    order: Optional[int] = None
+
 class DebateTopicOut(DebateTopicBase):
     id: int
     course_id: int
@@ -55,6 +64,13 @@ class StudentBase(BaseModel):
 
 class StudentCreate(StudentBase):
     pass
+
+class StudentUpdate(BaseModel):
+    name: Optional[str] = None
+    grade: Optional[int] = None
+
+class StudentBatchCreate(BaseModel):
+    students: list[StudentCreate] = Field(default_factory=list)
 
 class StudentOut(StudentBase):
     id: int
@@ -93,6 +109,9 @@ class StudentResponseOut(BaseModel):
     cleaned_text: str = ""
     source: str = "manual"
     feishu_minute_id: str = ""
+    audio_recording_id: Optional[int] = None
+    segment_start_ms: Optional[int] = None
+    segment_end_ms: Optional[int] = None
 
     ai_dimension_scores: Optional[dict] = None
     ai_confidence: str = "uncertain"
@@ -116,6 +135,12 @@ class TeacherReview(BaseModel):
     confidence_override: Optional[str] = None
     tags: list[str] = Field(default_factory=list)
     note: str = ""
+
+class TextImportRequest(BaseModel):
+    """Manual transcript paste from the recording entry page."""
+    student_id: int
+    topic_id: int
+    text: str
 
 
 # ── RubricTemplate ──────────────────────────────────────────

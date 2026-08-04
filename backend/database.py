@@ -113,6 +113,9 @@ class StudentResponse(Base):
     cleaned_text = Column(Text, default="")   # after cleaning stage
     source = Column(String(20), default="manual")  # manual / asr (Feishu Minutes)
     feishu_minute_id = Column(String(100), default="")  # bound Feishu minute token
+    audio_recording_id = Column(Integer, ForeignKey("audio_recordings.id"), nullable=True)
+    segment_start_ms = Column(Integer, nullable=True)
+    segment_end_ms = Column(Integer, nullable=True)
 
     # AI multi-dimensional assessment
     ai_dimension_scores = Column(JSON, nullable=True)
@@ -217,6 +220,24 @@ class DimensionTag(Base):
     topic_ids = Column(JSON, default=list)
 
 
+class AudioRecording(Base):
+    """A raw audio file uploaded by the teacher.
+
+    Scenario A (homework): one recording maps to one StudentResponse.
+    Scenario B (classroom): one recording is segmented into many responses via
+    StudentResponse.segment_start_ms / segment_end_ms.
+    """
+
+    __tablename__ = "audio_recordings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
+    topic_id = Column(Integer, ForeignKey("debate_topics.id"), nullable=False)
+    file_path = Column(String(500), default="")
+    duration_ms = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ── Helpers ─────────────────────────────────────────────────
 
 def get_db():
@@ -246,4 +267,10 @@ def _migrate():
             conn.execute(text("ALTER TABLE student_responses ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"))
         if "feishu_minute_id" not in cols:
             conn.execute(text("ALTER TABLE student_responses ADD COLUMN feishu_minute_id VARCHAR(100) DEFAULT ''"))
+        if "audio_recording_id" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN audio_recording_id INTEGER REFERENCES audio_recordings(id)"))
+        if "segment_start_ms" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN segment_start_ms INTEGER"))
+        if "segment_end_ms" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN segment_end_ms INTEGER"))
         conn.commit()

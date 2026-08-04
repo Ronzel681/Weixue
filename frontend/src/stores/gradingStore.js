@@ -5,6 +5,7 @@ const useStore = create((set, get) => ({
   // ── State ──────────────────────────────────────────────────
   courseId: null,
   course: null,
+  courses: [],
   topics: [],
   students: [],
   responses: {},        // { [studentId]: [response, ...] }
@@ -54,10 +55,25 @@ const useStore = create((set, get) => ({
 
   loadAllCourses: async () => {
     const list = await api.getCourses();
+    set({ courses: list });
     if (list.length > 0 && !get().courseId) {
       await get().loadCourse(list[0].id);
     }
     return list;
+  },
+
+  selectCourse: async (cid) => {
+    if (cid === get().courseId) return;
+    set({ courseId: cid, currentStudentIdx: 0 });
+    await get().loadCourse(cid);
+  },
+
+  createCourse: async (data) => {
+    const c = await api.createCourse(data);
+    const list = await api.getCourses();
+    set({ courses: list });
+    await get().selectCourse(c.id);
+    return c;
   },
 
   runAssessment: async () => {

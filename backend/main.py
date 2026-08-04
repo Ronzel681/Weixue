@@ -3,7 +3,7 @@
 import os
 from datetime import datetime
 from typing import Optional
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -14,12 +14,13 @@ import threading
 from database import (
     get_db, init_db, SessionLocal,
     Course, DebateTopic, Student, StudentResponse,
-    RubricTemplate, CalibrationRecord, DimensionTag,
+    RubricTemplate, CalibrationRecord, DimensionTag, AudioRecording,
     get_cognitive_tier,
 )
 from schemas import (
     CourseCreate, CourseOut, DebateTopicCreate, DebateTopicOut,
-    StudentCreate, StudentOut, StudentResponseOut, TeacherReview,
+    DebateTopicUpdate, StudentCreate, StudentUpdate, StudentBatchCreate,
+    StudentOut, StudentResponseOut, TeacherReview, TextImportRequest,
     CommentRequest, CommentOut, CommentSaveRequest, BatchCommentOut,
     TopicAnalytics, TagOut, TagUpdate, TagMerge,
     RubricTemplateOut,
@@ -28,6 +29,7 @@ from grading.evaluator import AssessmentEngine
 from grading.llm import LLMClient
 from grading.rubric_loader import RubricLoader
 from feishu.routes import router as feishu_router
+from asr import ASRClient, ASRError
 
 # Unified 6-level rating scale (A+/A/A-/B+/B/B-), shared by all analytics endpoints.
 # Must stay consistent with frontend/src/utils/ratings.js.
@@ -47,6 +49,12 @@ llm = LLMClient()
 evaluator = AssessmentEngine(llm)
 
 app.include_router(feishu_router)
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".wma", ".flac"}
+asr_client = ASRClient()
 
 # Thread-safe assessment progress tracker
 _assessment_progress = {}
@@ -91,6 +99,20 @@ def get_course(cid: int, db: Session = Depends(get_db)):
     )
 
 
+@app.post("/api/courses", response_model=CourseOut)
+def create_course(body: CourseCreate, db: Session = Depends(get_db)):
+    """Create a brand-new course — starts empty (no topics/students)."""
+    c = Course(**body.model_dump())
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return CourseOut(
+        id=c.id, title=c.title, class_name=c.class_name,
+        grade_level=c.grade_level, created_at=c.created_at,
+        topic_count=0, student_count=0,
+    )
+
+
 # ════════════════════════════════════════════════════════════
 # Debate Topics
 # ════════════════════════════════════════════════════════════
@@ -111,6 +133,29 @@ def create_topic(cid: int, body: DebateTopicCreate, db: Session = Depends(get_db
     db.commit()
     db.refresh(t)
     return t
+
+
+@app.put("/api/topics/{tid}", response_model=DebateTopicOut)
+def update_topic(tid: int, body: DebateTopicUpdate, db: Session = Depends(get_db)):
+    t = db.query(DebateTopic).get(tid)
+    if not t:
+        raise HTTPException(404, "Topic not found")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(t, field, value)
+    db.commit()
+    db.refresh(t)
+    return t
+
+
+@app.delete("/api/topics/{tid}")
+def delete_topic(tid: int, db: Session = Depends(get_db)):
+    t = db.query(DebateTopic).get(tid)
+    if not t:
+        raise HTTPException(404, "Topic not found")
+    db.delete(t)
+    db.commit()
+    return {"ok": True, "topic_id": tid}
 
 
 # ════════════════════════════════════════════════════════════
@@ -143,6 +188,67 @@ def create_student(cid: int, body: StudentCreate, db: Session = Depends(get_db))
         course_id=s.course_id, cognitive_tier=s.cognitive_tier,
         comment_draft=s.comment_draft or "",
     )
+
+
+@app.post("/api/courses/{cid}/students/batch", response_model=dict)
+def create_students_batch(cid: int, body: StudentBatchCreate, db: Session = Depends(get_db)):
+    """Batch-create students from the homework-entry panel ("姓名,年级" per line).
+    Students with the same name in this course are skipped."""
+    if not db.query(Course).get(cid):
+        raise HTTPException(404, "Course not found")
+    created, skipped = [], []
+    for item in body.students:
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        existing = (
+            db.query(Student)
+            .filter(Student.course_id == cid, Student.name == name)
+            .first()
+        )
+        if existing:
+            skipped.append(existing.name)
+            continue
+        st = Student(course_id=cid, name=name, grade=item.grade)
+        db.add(st)
+        db.flush()
+        created.append(
+            StudentOut(
+                id=st.id, name=st.name, grade=st.grade,
+                course_id=st.course_id, cognitive_tier=st.cognitive_tier,
+                comment_draft="",
+            )
+        )
+    db.commit()
+    return {"created": created, "skipped": skipped}
+
+
+@app.put("/api/students/{sid}", response_model=StudentOut)
+def update_student(sid: int, body: StudentUpdate, db: Session = Depends(get_db)):
+    s = db.query(Student).get(sid)
+    if not s:
+        raise HTTPException(404, "Student not found")
+    if body.name is not None and body.name.strip():
+        s.name = body.name.strip()
+    if body.grade is not None:
+        s.grade = body.grade
+    db.commit()
+    db.refresh(s)
+    return StudentOut(
+        id=s.id, name=s.name, grade=s.grade,
+        course_id=s.course_id, cognitive_tier=s.cognitive_tier,
+        comment_draft=s.comment_draft or "",
+    )
+
+
+@app.delete("/api/students/{sid}")
+def delete_student(sid: int, db: Session = Depends(get_db)):
+    s = db.query(Student).get(sid)
+    if not s:
+        raise HTTPException(404, "Student not found")
+    db.delete(s)
+    db.commit()
+    return {"ok": True, "student_id": sid}
 
 
 # ════════════════════════════════════════════════════════════
@@ -422,6 +528,148 @@ def review_response(rid: int, body: TeacherReview, db: Session = Depends(get_db)
     db.commit()
     db.refresh(resp)
     return resp
+
+
+# ════════════════════════════════════════════════════════════
+# Audio import (ASR pipeline — independent of Feishu Minutes)
+# ════════════════════════════════════════════════════════════
+
+@app.post("/api/courses/{cid}/audio/import", response_model=StudentResponseOut)
+async def import_audio(
+    cid: int,
+    student_id: int = Form(...),
+    topic_id: int = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Upload classroom audio, transcribe via ASR (mock / dashscope / openai),
+    store the transcript as raw_text, and reset stale assessment results."""
+    student = db.query(Student).get(student_id)
+    topic = db.query(DebateTopic).get(topic_id)
+    if not student or student.course_id != cid or not topic or topic.course_id != cid:
+        raise HTTPException(400, "student/topic not found in course")
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_AUDIO_EXT:
+        raise HTTPException(
+            400, f"unsupported audio type: {ext} (allowed: {sorted(ALLOWED_AUDIO_EXT)})"
+        )
+
+    safe_name = f"{cid}_{student_id}_{topic_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    dest = os.path.join(UPLOAD_DIR, safe_name)
+    with open(dest, "wb") as fh:
+        fh.write(await file.read())
+
+    recording = AudioRecording(course_id=cid, topic_id=topic.id, file_path=dest)
+    db.add(recording)
+    db.flush()
+
+    resp = (
+        db.query(StudentResponse)
+        .filter(
+            StudentResponse.student_id == student_id,
+            StudentResponse.topic_id == topic_id,
+        )
+        .first()
+    )
+    if resp is None:
+        resp = StudentResponse(
+            student_id=student_id, topic_id=topic_id, raw_text="", source="audio"
+        )
+        db.add(resp)
+    resp.audio_recording_id = recording.id
+
+    try:
+        transcript = await asr_client.transcribe(dest)
+    except ASRError as exc:
+        resp.source = "audio"
+        db.commit()
+        raise HTTPException(502, f"转写失败：{exc}")
+
+    # A new transcript invalidates the previous assessment
+    resp.raw_text = transcript
+    resp.cleaned_text = ""
+    resp.source = "audio"
+    resp.ai_dimension_scores = None
+    resp.ai_confidence = "uncertain"
+    resp.ai_reasoning = {}
+    resp.ai_extracted_features = {}
+    resp.ai_note = ""
+    resp.ai_suggested_tags = []
+    resp.teacher_dimension_scores = None
+    resp.teacher_confidence_override = None
+    resp.teacher_tags = []
+    resp.teacher_note = ""
+    resp.teacher_reviewed = False
+    db.commit()
+    db.refresh(resp)
+    return resp
+
+
+@app.post("/api/courses/{cid}/responses/text", response_model=StudentResponseOut)
+async def import_text(
+    cid: int,
+    body: TextImportRequest,
+    db: Session = Depends(get_db),
+):
+    """Manual transcript paste (source='manual') — same reset semantics as audio import."""
+    student = db.query(Student).get(body.student_id)
+    topic = db.query(DebateTopic).get(body.topic_id)
+    if not student or student.course_id != cid or not topic or topic.course_id != cid:
+        raise HTTPException(400, "student/topic not found in course")
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(400, "text cannot be empty")
+
+    resp = (
+        db.query(StudentResponse)
+        .filter(
+            StudentResponse.student_id == body.student_id,
+            StudentResponse.topic_id == body.topic_id,
+        )
+        .first()
+    )
+    if resp is None:
+        resp = StudentResponse(
+            student_id=body.student_id, topic_id=body.topic_id,
+            raw_text=text, source="manual",
+        )
+        db.add(resp)
+
+    # New content invalidates the previous assessment
+    resp.raw_text = text
+    resp.cleaned_text = ""
+    resp.source = "manual"
+    resp.ai_dimension_scores = None
+    resp.ai_confidence = "uncertain"
+    resp.ai_reasoning = {}
+    resp.ai_extracted_features = {}
+    resp.ai_note = ""
+    resp.ai_suggested_tags = []
+    resp.teacher_dimension_scores = None
+    resp.teacher_confidence_override = None
+    resp.teacher_tags = []
+    resp.teacher_note = ""
+    resp.teacher_reviewed = False
+    db.commit()
+    db.refresh(resp)
+    return resp
+
+
+@app.delete("/api/responses/{rid}")
+def delete_response(rid: int, db: Session = Depends(get_db)):
+    """Delete a single student response — removes the student from that topic.
+    Cascades calibration records and the linked audio recording row."""
+    resp = db.query(StudentResponse).get(rid)
+    if not resp:
+        raise HTTPException(404, "Response not found")
+    if resp.audio_recording_id:
+        rec = db.get(AudioRecording, resp.audio_recording_id)
+        if rec:
+            db.delete(rec)
+    db.delete(resp)  # cascades calibrations via the relationship
+    db.commit()
+    return {"ok": True, "response_id": rid}
 
 
 # ════════════════════════════════════════════════════════════

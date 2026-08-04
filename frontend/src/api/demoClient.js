@@ -13,6 +13,11 @@ const _pristine = demoData;
 let _data = _clone(demoData);
 const ok = (d) => Promise.resolve(d);
 
+// Demo transcript used by the simulated audio import (matches the 动物园 topics).
+const DEMO_TRANSCRIPT =
+  '我觉得应该把老鹰放回野外。因为老鹰本来就是天空的动物，关在动物园里就只能走来走去，很不自由。' +
+  '我同意它康复后放走，但是要确认它真的能自己抓食物再放，不然它又会受伤。';
+
 // ── JSON field parsers ──────────────────────────────────
 
 function _jp(val) {
@@ -57,13 +62,63 @@ function _parseTag(t) {
 // ── Courses ─────────────────────────────────────────────
 export const getCourses = () => ok(_data.courses);
 export const getCourse = (cid) => ok(_data.courses.find(c => c.id === cid));
+export const createCourse = (data) => {
+  const id = Math.max(0, ..._data.courses.map(c => c.id)) + 1;
+  const c = { id, ...data, created_at: new Date().toISOString(), topic_count: 0, student_count: 0 };
+  _data.courses.push(c);
+  return ok(c);
+};
 
 // ── Topics ──────────────────────────────────────────────
 export const getTopics = (cid) =>
   ok(_data.topics.filter(t => t.course_id === cid).map(_parseTopic));
+export const createTopic = (cid, data) => {
+  const courseTopics = _data.topics.filter(t => t.course_id === cid);
+  const order = courseTopics.length ? Math.max(...courseTopics.map(t => t.order)) + 1 : 1;
+  const t = {
+    id: Math.max(0, ..._data.topics.map(x => x.id)) + 1,
+    course_id: cid,
+    order,
+    rubric_template_id: null,
+    ...data,
+  };
+  _data.topics.push(t);
+  return ok(t);
+};
+export const updateTopic = (tid, data) => {
+  const t = _data.topics.find(x => x.id === tid);
+  if (t) Object.assign(t, data);
+  return ok(t);
+};
+export const deleteTopic = (tid) => {
+  _data.topics = _data.topics.filter(x => x.id !== tid);
+  _data.responses = _data.responses.filter(r => r.topic_id !== tid);
+  return ok({ ok: true, topic_id: tid });
+};
 
 // ── Students ────────────────────────────────────────────
 export const getStudents = (cid) => ok(_data.students.filter(s => s.course_id === cid));
+export const createStudentsBatch = (cid, students) => {
+  const created = [];
+  let nextId = Math.max(0, ..._data.students.map(s => s.id)) + 1;
+  students.forEach(s => {
+    if (_data.students.some(x => x.course_id === cid && x.name === s.name)) return;
+    const st = { id: nextId++, course_id: cid, name: s.name, grade: s.grade, comment_draft: '' };
+    _data.students.push(st);
+    created.push(st);
+  });
+  return ok({ created, skipped: [] });
+};
+export const updateStudent = (sid, data) => {
+  const s = _data.students.find(x => x.id === sid);
+  if (s) Object.assign(s, data);
+  return ok(s);
+};
+export const deleteStudent = (sid) => {
+  _data.students = _data.students.filter(x => x.id !== sid);
+  _data.responses = _data.responses.filter(r => r.student_id !== sid);
+  return ok({ ok: true, student_id: sid });
+};
 
 // ── Responses ───────────────────────────────────────────
 export const getResponses = (cid, studentId) => {
@@ -75,6 +130,11 @@ export const getResponses = (cid, studentId) => {
 export const getResponse = (rid) =>
   ok(_parseResponse(_data.responses.find(r => r.id === rid)));
 
+export const deleteResponse = (rid) => {
+  _data.responses = _data.responses.filter(r => r.id !== rid);
+  return ok({ ok: true, response_id: rid });
+};
+
 export const reviewResponse = (rid, data) => {
   const resp = _data.responses.find(r => r.id === rid);
   if (resp) {
@@ -84,6 +144,35 @@ export const reviewResponse = (rid, data) => {
     resp.teacher_note = data.note || '';
     resp.teacher_reviewed = true;
   }
+  return ok(_parseResponse(resp));
+};
+
+export const importAudio = (cid, studentId, topicId, file) => {
+  const resp = _data.responses.find(
+    r => r.student_id === studentId && r.topic_id === topicId
+  );
+  if (resp) {
+    resp.raw_text = DEMO_TRANSCRIPT;
+    resp.source = 'audio';
+    resp.cleaned_text = '';
+    resp.ai_dimension_scores = null;
+    resp.ai_confidence = 'uncertain';
+    resp.teacher_reviewed = false;
+  }
+  return ok(_parseResponse(resp));
+};
+export const importText = (cid, studentId, topicId, text) => {
+  let resp = _data.responses.find(r => r.student_id === studentId && r.topic_id === topicId);
+  if (!resp) {
+    resp = { id: Math.max(0, ..._data.responses.map(r => r.id)) + 1, student_id: studentId, topic_id: topicId };
+    _data.responses.push(resp);
+  }
+  resp.raw_text = text;
+  resp.source = 'manual';
+  resp.cleaned_text = '';
+  resp.ai_dimension_scores = null;
+  resp.ai_confidence = 'uncertain';
+  resp.teacher_reviewed = false;
   return ok(_parseResponse(resp));
 };
 
