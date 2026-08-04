@@ -8,7 +8,9 @@
  */
 import demoData from '../demo-data.json';
 
-const _data = demoData;
+const _clone = (v) => JSON.parse(JSON.stringify(v));
+const _pristine = demoData;
+let _data = _clone(demoData);
 const ok = (d) => Promise.resolve(d);
 
 // ── JSON field parsers ──────────────────────────────────
@@ -73,21 +75,50 @@ export const getResponses = (cid, studentId) => {
 export const getResponse = (rid) =>
   ok(_parseResponse(_data.responses.find(r => r.id === rid)));
 
-export const reviewResponse = (rid, data) => ok({ ok: true });
+export const reviewResponse = (rid, data) => {
+  const resp = _data.responses.find(r => r.id === rid);
+  if (resp) {
+    resp.teacher_dimension_scores = data.dimension_scores || null;
+    resp.teacher_confidence_override = data.confidence_override || null;
+    resp.teacher_tags = data.tags || [];
+    resp.teacher_note = data.note || '';
+    resp.teacher_reviewed = true;
+  }
+  return ok(_parseResponse(resp));
+};
 
 // ── Assessment (no-op in demo) ──────────────────────────
 export const assessCourse = (cid) => ok({ assessed: 0, skipped: 0 });
 export const getAssessmentProgress = (cid) =>
-  ok({ total: _data.responses.length, assessed: _data.responses.length, pending: 0 });
-export const resetCourse = (cid) => ok({ ok: true });
+  ok({
+    completed: _data.responses.length,
+    total: _data.responses.length,
+    active: false,
+    llm_calls: 0,
+    skipped: 0,
+    errors: 0,
+  });
+export const resetCourse = (cid) => {
+  _data = _clone(_pristine);
+  return ok({ ok: true });
+};
 
 // ── Comments ────────────────────────────────────────────
 export const generateComment = (cid, studentId) => {
   const s = _data.students.find(s => s.id === studentId);
   return ok({ student_id: studentId, draft: s?.comment_draft || '' });
 };
-export const saveCommentDraft = (cid, studentId, draft) => ok({ ok: true });
-export const batchGenerateComments = (cid) => ok({ results: [] });
+export const saveCommentDraft = (cid, studentId, draft) => {
+  const s = _data.students.find(s => s.id === studentId);
+  if (s) s.comment_draft = draft;
+  return ok({ ok: true });
+};
+export const batchGenerateComments = (cid) => {
+  const results = _data.students
+    .filter(s => s.course_id === cid && s.comment_draft)
+    .map(s => ({ student_id: s.id, student_name: s.name, draft: s.comment_draft, error: null }));
+  return ok({ results });
+};
 
 // ── Prep Analytics (simplified) ─────────────────────────
 export const getPrepAnalytics = (cid) => ok([]);

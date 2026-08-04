@@ -91,6 +91,8 @@ class StudentResponseOut(BaseModel):
 
     raw_text: str = ""
     cleaned_text: str = ""
+    source: str = "manual"
+    feishu_minute_id: str = ""
 
     ai_dimension_scores: Optional[dict] = None
     ai_confidence: str = "uncertain"

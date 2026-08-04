@@ -575,6 +575,10 @@ TAG_SEEDS = [
     '因果链条不完整', '部分跑题但能自行拉回', '开始尝试多角度思考',
     '识别了隐藏假设', '论证有深度', '篇幅长但内容空洞',
     '反驳角度独特', '概念界定意识强',
+    ('动物园', 'teacher', 1),
+    ('论证质量待加强', 'teacher', 1),
+    ('相关性极佳', 'teacher', 1),
+    ('表达需增强', 'teacher', 1),
 ]
 
 # ══════════════════════════════════════════════════════════════
@@ -625,6 +629,79 @@ CALIBRATION_SEEDS = [
         'student_grade': 6,
     },
 ]
+
+# ══════════════════════════════════════════════════════════════
+# TEACHER REVIEWS (demo state: every response has been reviewed)
+# Seeded so a fresh `python seed.py --force` yields a complete demo —
+# comment generation requires at least one teacher-reviewed topic.
+# Keyed by student id; keys match the STUDENTS list above.
+# ══════════════════════════════════════════════════════════════
+
+TEACHER_REVIEWS = {
+    1: {
+        'topic_id': 1,
+        'teacher_dimension_scores': {'清晰性': 'B+', '解释力': 'A-', '证据意识': 'A-'},
+        'teacher_tags': ['能自发考虑反方观点', '情感投入丰富', '有简单因果推理'],
+        'teacher_note': '',
+        'teacher_confidence_override': None,
+    },
+    2: {
+        'topic_id': 1,
+        'teacher_dimension_scores': {'清晰性': 'A-', '解释力': 'A-', '证据意识': 'B+'},
+        'teacher_tags': ['有解释意图', '证据意识萌芽', '口语化表达', '表达需增强'],
+        'teacher_note': '',
+        'teacher_confidence_override': None,
+    },
+    3: {
+        'topic_id': 1,
+        'teacher_dimension_scores': {'清晰性': 'A', '解释力': 'A', '证据意识': 'B'},
+        'teacher_tags': ['表达清晰', '证据意识待发展'],
+        'teacher_note': '',
+        'teacher_confidence_override': None,
+    },
+    4: {
+        'topic_id': 2,
+        'teacher_dimension_scores': {'清晰性': 'A', '相关性': 'A', '因果推理': 'A-', '证据使用': 'A'},
+        'teacher_tags': ['因果推理', '证据使用', '优秀论证'],
+        'teacher_note': '',
+        'teacher_confidence_override': None,
+    },
+    5: {
+        'topic_id': 2,
+        'teacher_dimension_scores': {'清晰性': 'A-', '相关性': 'A', '因果推理': 'A-', '证据使用': 'A-'},
+        'teacher_tags': ['自我质疑', '事实与观点', '证据使用', '因果推理'],
+        'teacher_note': '证据使用尚可',
+        'teacher_confidence_override': None,
+    },
+    6: {
+        'topic_id': 2,
+        'teacher_dimension_scores': {'清晰性': 'A', '相关性': 'A+', '因果推理': 'A', '证据使用': 'A'},
+        'teacher_tags': ['逻辑推理清晰', '视角多元分析', '相关性极佳'],
+        'teacher_note': '相关性极佳',
+        'teacher_confidence_override': None,
+    },
+    7: {
+        'topic_id': 3,
+        'teacher_dimension_scores': {'clarity': 'A', 'relevance': 'A', 'argument_evaluation': 'B+', 'depth_breadth': 'A', 'self_regulation': 'A'},
+        'teacher_tags': ['多角度分析', '因果推理', '论证质量待加强'],
+        'teacher_note': '',
+        'teacher_confidence_override': None,
+    },
+    8: {
+        'topic_id': 3,
+        'teacher_dimension_scores': {'clarity': 'A', 'relevance': 'A', 'argument_evaluation': 'A-', 'depth_breadth': 'A', 'self_regulation': 'A-'},
+        'teacher_tags': ['因果推理', '概念分析', '反驳意识待加强', '动物园'],
+        'teacher_note': '很好的因果推理能力',
+        'teacher_confidence_override': None,
+    },
+    9: {
+        'topic_id': 3,
+        'teacher_dimension_scores': {'clarity': 'B+', 'relevance': 'B+', 'argument_evaluation': 'B', 'depth_breadth': 'B', 'self_regulation': 'B'},
+        'teacher_tags': ['单一视角', '需加强因果推理', '个人经验主导', '缺乏反驳', '论证意识初现'],
+        'teacher_note': '',
+        'teacher_confidence_override': None,
+    },
+}
 
 # ══════════════════════════════════════════════════════════════
 # SEED FUNCTION
@@ -705,10 +782,21 @@ def seed(force=False):
                 cleaned_text='',
             )
             db.add(resp)
+            review = TEACHER_REVIEWS.get(student.id)
+            if review and review['topic_id'] == topic_order:
+                resp.teacher_dimension_scores = review['teacher_dimension_scores']
+                resp.teacher_tags = review['teacher_tags']
+                resp.teacher_note = review['teacher_note']
+                resp.teacher_confidence_override = review['teacher_confidence_override']
+                resp.teacher_reviewed = True
 
     # Seed Dimension Tags
-    for tag_name in TAG_SEEDS:
-        t = DimensionTag(course_id=cid, name=tag_name, source='base', use_count=0)
+    for tag_seed in TAG_SEEDS:
+        if isinstance(tag_seed, tuple):
+            tag_name, source, use_count = tag_seed
+        else:
+            tag_name, source, use_count = tag_seed, 'base', 0
+        t = DimensionTag(course_id=cid, name=tag_name, source=source, use_count=use_count)
         db.add(t)
 
     # Seed Calibration Records
@@ -716,7 +804,7 @@ def seed(force=False):
     all_responses = db.query(StudentResponse).all()
     resp_by_grade = {}
     for r in all_responses:
-        st = db.query(Student).get(r.student_id)
+        st = db.get(Student, r.student_id)
         if st:
             grade = st.grade
             if grade not in resp_by_grade:
@@ -750,6 +838,7 @@ def seed(force=False):
     print(f"  - {len(STUDENTS)} students")
     print(f"  - {len(TAG_SEEDS)} dimension tags")
     print(f"  - {len(CALIBRATION_SEEDS)} calibration records")
+    print(f"  - {len(TEACHER_REVIEWS)} teacher-reviewed responses")
     db.close()
 
 

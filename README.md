@@ -77,10 +77,12 @@ Weixue/
 │   ├── schemas.py             # Pydantic 请求/响应模型
 │   ├── seed.py                # 演示数据填充
 │   ├── grading/
-│   │   ├── evaluator.py       # 认知梯度评估引擎
+│   │   ├── evaluator.py       # 双层流水线（Layer1 文本清洗 + Layer2 维度评估）
 │   │   ├── rubric_loader.py   # Rubric 模板加载 + prompt 组装 + 校准注入
-│   │   ├── engine.py          # 文本清洗 + 特征提取
 │   │   └── llm.py             # LLM 客户端适配器
+│   ├── feishu/                # 飞书集成（妙记转写 / 多维表格 / 机器人）
+│   ├── export_demo_data.py    # 导出演示数据到前端 demo 模式
+│   ├── restore_demo_state.py  # 从 demo-data.json 快照恢复教师批改状态
 │   └── data/                  # SQLite 数据库
 ├── frontend/
 │   ├── src/
@@ -103,7 +105,7 @@ Weixue/
 
 ### 方式1：在线演示（无需部署）
 
-直接访问 [GitHub Pages](https://l-i-t-t-l-e-l-i-u.github.io/weixue/)，所有演示数据已内嵌在前端中。
+直接访问 [GitHub Pages](https://l-i-t-t-l-e-l-i-u.github.io/Weixue/)，所有演示数据已内嵌在前端中。
 
 
 

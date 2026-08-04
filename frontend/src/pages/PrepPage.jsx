@@ -21,18 +21,50 @@ export default function PrepPage() {
   const [lessonPlan, setLessonPlan] = useState([]);
   const [notes, setNotes] = useState({});
   const [loading, setLoading] = useState(true);
+  const [confirmed, setConfirmed] = useState(false);
+
+  const storageKey = courseId ? `weixue-prep-${courseId}` : null;
+
+  const persist = (plan, noteMap) => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ lessonPlan: plan, notes: noteMap }));
+    } catch { /* localStorage unavailable — ignore */ }
+  };
 
   useEffect(() => {
     if (!courseId) return;
     api.getPrepAnalytics(courseId)
       .then(data => {
         setAnalytics(data);
-        // Auto-select topics with weak dimensions
-        setLessonPlan(data.filter(d => d.weak_dimensions.length > 0).slice(0, 3).map(d => d.topic_id));
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(`weixue-prep-${courseId}`)); } catch { /* ignore */ }
+        if (saved && Array.isArray(saved.lessonPlan)) {
+          // Keep only topics that still exist in analytics
+          const valid = saved.lessonPlan.filter(id => data.some(d => d.topic_id === id));
+          setLessonPlan(valid);
+          setNotes(saved.notes || {});
+        } else {
+          // Auto-select topics with weak dimensions
+          setLessonPlan(data.filter(d => d.weak_dimensions.length > 0).slice(0, 3).map(d => d.topic_id));
+        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [courseId]);
+
+  // Auto-save plan + notes locally so refresh doesn't lose them.
+  useEffect(() => {
+    // Skip while initial data is still loading, otherwise an empty plan
+    // would clobber previously saved state on first render.
+    if (!loading) persist(lessonPlan, notes);
+  }, [lessonPlan, notes, loading]);
+
+  const confirmPlan = () => {
+    persist(lessonPlan, notes);
+    setConfirmed(true);
+    setTimeout(() => setConfirmed(false), 2500);
+  };
 
   if (loading) return <div className="text-slate-400 py-10 text-center">加载讲评数据...</div>;
 
@@ -115,8 +147,12 @@ export default function PrepPage() {
           );
         })}
 
-        <button className="w-full bg-indigo-600 text-white rounded-xl py-3 font-medium text-sm cursor-pointer hover:bg-indigo-700 transition-colors">
-          确认讲评计划 →
+        <button
+          onClick={confirmPlan}
+          className={`w-full text-white rounded-xl py-3 font-medium text-sm cursor-pointer transition-colors
+            ${confirmed ? 'bg-green-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+        >
+          {confirmed ? '讲评计划已确认 ✓（已保存在本地）' : '确认讲评计划 →'}
         </button>
       </div>
 

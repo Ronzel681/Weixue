@@ -22,11 +22,16 @@ from schemas import (
     StudentCreate, StudentOut, StudentResponseOut, TeacherReview,
     CommentRequest, CommentOut, CommentSaveRequest, BatchCommentOut,
     TopicAnalytics, TagOut, TagUpdate, TagMerge,
-    RubricTemplateOut, CalibrationRecordOut,
+    RubricTemplateOut,
 )
 from grading.evaluator import AssessmentEngine
 from grading.llm import LLMClient
 from grading.rubric_loader import RubricLoader
+from feishu.routes import router as feishu_router
+
+# Unified 6-level rating scale (A+/A/A-/B+/B/B-), shared by all analytics endpoints.
+# Must stay consistent with frontend/src/utils/ratings.js.
+RATING_TO_NUM = {"A+": 4.0, "A": 3.5, "A-": 3.0, "B+": 2.5, "B": 2.0, "B-": 1.0}
 
 app = FastAPI(title="思辨星 · 少儿思辨能力认知自适应评估系统", version="0.1.0")
 
@@ -40,6 +45,8 @@ app.add_middleware(
 
 llm = LLMClient()
 evaluator = AssessmentEngine(llm)
+
+app.include_router(feishu_router)
 
 # Thread-safe assessment progress tracker
 _assessment_progress = {}
@@ -726,7 +733,7 @@ def prep_analytics(cid: int, db: Session = Depends(get_db)):
     topics = db.query(DebateTopic).filter(DebateTopic.course_id == cid).order_by(DebateTopic.order).all()
     students = db.query(Student).filter(Student.course_id == cid).all()
 
-    rating_map = {"A": 4, "A+": 4, "B+": 3.5, "B": 3, "C+": 2.5, "C": 2, "D": 1}
+    rating_map = RATING_TO_NUM
     result = []
 
     for topic in topics:
@@ -750,7 +757,7 @@ def prep_analytics(cid: int, db: Session = Depends(get_db)):
             if scores:
                 student_avg = 0
                 for dim, rating in scores.items():
-                    val = rating_map.get(rating, 2)
+                    val = rating_map.get(rating, 2.0)
                     if dim not in dim_scores:
                         dim_scores[dim] = []
                     dim_scores[dim].append(val)
@@ -872,7 +879,7 @@ def class_report(cid: int, db: Session = Depends(get_db)):
     topics = db.query(DebateTopic).filter(DebateTopic.course_id == cid).order_by(DebateTopic.order).all()
     students = db.query(Student).filter(Student.course_id == cid).all()
 
-    rating_map = {"A": 4, "A+": 4, "B+": 3.5, "B": 3, "C+": 2.5, "C": 2, "D": 1}
+    rating_map = RATING_TO_NUM
 
     # Per-topic
     topic_stats = []
@@ -891,11 +898,11 @@ def class_report(cid: int, db: Session = Depends(get_db)):
             if conf == "uncertain" and not resp.teacher_dimension_scores:
                 uncertain += 1
                 continue
-            if scores:
-                for dim, rating in scores.items():
-                    if dim not in dim_scores:
-                        dim_scores[dim] = []
-                    dim_scores[dim].append(rating_map.get(rating, 2))
+                if scores:
+                    for dim, rating in scores.items():
+                        if dim not in dim_scores:
+                            dim_scores[dim] = []
+                    dim_scores[dim].append(rating_map.get(rating, 2.0))
 
         avg_dims = {d: round(sum(v) / len(v), 2) for d, v in dim_scores.items()} if dim_scores else {}
         topic_stats.append({
@@ -923,7 +930,7 @@ def class_report(cid: int, db: Session = Depends(get_db)):
                 unc += 1
             elif scores:
                 for rating in scores.values():
-                    all_vals.append(rating_map.get(rating, 2))
+                    all_vals.append(rating_map.get(rating, 2.0))
 
         avg_score = sum(all_vals) / len(all_vals) if all_vals else 0
         student_stats.append({
@@ -959,23 +966,6 @@ def class_report(cid: int, db: Session = Depends(get_db)):
 @app.get("/api/rubric-templates", response_model=list[RubricTemplateOut])
 def list_rubric_templates(db: Session = Depends(get_db)):
     return db.query(RubricTemplate).all()
-
-
-# ════════════════════════════════════════════════════════════
-# Calibration Records (read-only)
-# ════════════════════════════════════════════════════════════
-
-@app.get("/api/courses/{cid}/calibrations", response_model=list[CalibrationRecordOut])
-def list_calibrations(cid: int, db: Session = Depends(get_db)):
-    records = (
-        db.query(CalibrationRecord)
-        .join(StudentResponse)
-        .join(Student)
-        .filter(Student.course_id == cid)
-        .order_by(CalibrationRecord.created_at.desc())
-        .all()
-    )
-    return records
 
 
 # ════════════════════════════════════════════════════════════

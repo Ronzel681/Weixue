@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import useStore from '../stores/gradingStore';
 import * as api from '../api/client';
+import { avgRating } from '../utils/ratings';
 
 /* ── Rating color helper ─────────────────────────────────── */
 const ratingColor = (rating) => {
@@ -19,14 +20,6 @@ const DIM_LABELS = {
   clarity: '清晰性', interpretation: '解释力', evidence_awareness: '证据意识',
   relevance: '相关性', inference: '因果推理', evidence_use: '证据使用',
   argument_evaluation: '论证质量', depth_breadth: '深度广度', self_regulation: '反思调节',
-};
-
-/* Compute an overall "average" rating number from dimension scores dict */
-const ratingToNum = { 'A+': 4, 'A': 3.5, 'A-': 3, 'B+': 2.5, 'B': 2, 'B-': 1 };
-const avgRating = (scores) => {
-  if (!scores) return 0;
-  const vals = Object.values(scores).map(r => ratingToNum[r] || 0);
-  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
 };
 
 const overallBadge = (avg) => {

@@ -11,7 +11,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "grading.db")
+# WEIXUE_DB_PATH overrides the default SQLite location (useful for tests/temp DBs).
+DB_PATH = os.getenv(
+    "WEIXUE_DB_PATH",
+    os.path.join(os.path.dirname(__file__), "data", "grading.db"),
+)
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
@@ -107,6 +111,8 @@ class StudentResponse(Base):
     # Raw and cleaned text
     raw_text = Column(Text, default="")       # original speech/writing (with noise)
     cleaned_text = Column(Text, default="")   # after cleaning stage
+    source = Column(String(20), default="manual")  # manual / asr (Feishu Minutes)
+    feishu_minute_id = Column(String(100), default="")  # bound Feishu minute token
 
     # AI multi-dimensional assessment
     ai_dimension_scores = Column(JSON, nullable=True)
@@ -223,3 +229,21 @@ def get_db():
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate()
+
+
+def _migrate():
+    """Lightweight additive migrations for existing SQLite databases.
+
+    SQLAlchemy create_all() does not alter existing tables, so new columns on
+    StudentResponse are added here with plain ALTER TABLE statements.
+    """
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.execute(text("PRAGMA table_info(student_responses)"))}
+        if "source" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"))
+        if "feishu_minute_id" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN feishu_minute_id VARCHAR(100) DEFAULT ''"))
+        conn.commit()

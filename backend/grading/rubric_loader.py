@@ -7,7 +7,6 @@ negative indicators, and optional teacher calibration examples.
 
 from typing import Optional
 from sqlalchemy.orm import Session
-from .llm import LLMClient
 from database import RubricTemplate, CalibrationRecord, StudentResponse, Student, get_cognitive_tier
 
 

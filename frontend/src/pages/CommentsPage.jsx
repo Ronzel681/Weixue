@@ -1,13 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import useStore from '../stores/gradingStore';
 import * as api from '../api/client';
-
-const ratingToNum = { 'A+': 4, 'A': 3.5, 'A-': 3, 'B+': 2.5, 'B': 2, 'B-': 1 };
-const avgRating = (scores) => {
-  if (!scores) return 0;
-  const vals = Object.values(scores).map(r => ratingToNum[r] || 0);
-  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-};
+import { avgRating } from '../utils/ratings';
 const ratingLabel = (avg) => {
   if (avg >= 3.5) return { text: '优秀', cls: 'text-green-600' };
   if (avg >= 2.5) return { text: '良好', cls: 'text-emerald-600' };
@@ -29,6 +23,7 @@ export default function CommentsPage() {
   const [saveStatus, setSaveStatus] = useState(''); // '' | 'saving' | 'saved'
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchResult, setBatchResult] = useState(null);
+  const [sendStatus, setSendStatus] = useState(''); // '' | 'copied'
   const saveTimer = useRef(null);
 
   const student = students[currentStudentIdx];
@@ -105,6 +100,18 @@ export default function CommentsPage() {
       setDraft('生成失败，请确保已完成教师批改。');
     }
     setLoading(false);
+  };
+
+  // TODO(M4): replace clipboard copy with Feishu bot push (see 飞书集成技术方案.md §4.3).
+  const handleSend = async () => {
+    if (!draft) return;
+    try {
+      await navigator.clipboard.writeText(draft);
+      setSendStatus('copied');
+      setTimeout(() => setSendStatus(''), 2500);
+    } catch {
+      setSendStatus('');
+    }
   };
 
   const batchGenerate = async () => {
@@ -310,7 +317,13 @@ export default function CommentsPage() {
 
             {draft && !loading && (
               <div className="flex gap-2 justify-end">
-                <button className="px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium cursor-pointer hover:bg-indigo-700">发送给学生</button>
+                <button
+                  onClick={handleSend}
+                  className={`px-5 py-2 rounded-lg text-white text-sm font-medium cursor-pointer transition-colors
+                    ${sendStatus === 'copied' ? 'bg-green-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                >
+                  {sendStatus === 'copied' ? '已复制，去飞书发送 ✓' : '发送给学生'}
+                </button>
               </div>
             )}
           </div>
