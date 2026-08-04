@@ -1,11 +1,26 @@
-/**
- * Shared rating helpers.
- * Keep in sync with backend RATING_TO_NUM in backend/main.py.
- */
-export const RATING_TO_NUM = { 'A+': 4, 'A': 3.5, 'A-': 3, 'B+': 2.5, 'B': 2, 'B-': 1 };
+export const RATING_VALUES = Object.freeze({
+  'A+': 4,
+  'A': 3.5,
+  'A-': 3,
+  'B+': 2.5,
+  'B': 2,
+  'B-': 1,
+});
 
-export const avgRating = (scores) => {
-  if (!scores) return 0;
-  const vals = Object.values(scores).map(r => RATING_TO_NUM[r] ?? 0);
-  return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+export const RATING_OPTIONS = Object.freeze(Object.keys(RATING_VALUES));
+
+export const ratingToNumber = (rating) => RATING_VALUES[rating] ?? null;
+
+export const averageRating = (scores) => {
+  if (!scores || typeof scores !== 'object') return 0;
+  const values = Object.values(scores)
+    .map(ratingToNumber)
+    .filter(value => value !== null);
+  return values.length > 0
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : 0;
 };
+
+// Compatibility aliases for components introduced in the collaborator branch.
+export const RATING_TO_NUM = RATING_VALUES;
+export const avgRating = averageRating;

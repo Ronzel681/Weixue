@@ -36,6 +36,8 @@ export const generateComment = (...a) => _isDemo ? _demo.generateComment(...a) :
   api.post(`/courses/${a[0]}/comments`, { student_id: a[1] }).then(r => r.data);
 export const saveCommentDraft = (...a) => _isDemo ? _demo.saveCommentDraft(...a) :
   api.post(`/courses/${a[0]}/comments/save`, { student_id: a[1], draft: a[2] }).then(r => r.data);
+export const sendComment = (...a) => _isDemo ? _demo.sendComment(...a) :
+  api.post(`/courses/${a[0]}/comments/send`, { student_id: a[1], draft: a[2] }).then(r => r.data);
 export const batchGenerateComments = (...a) => _isDemo ? _demo.batchGenerateComments(...a) :
   api.post(`/courses/${a[0]}/comments/batch`).then(r => r.data);
 

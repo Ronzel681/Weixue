@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import useStore from '../stores/gradingStore';
 import * as api from '../api/client';
-import { avgRating } from '../utils/ratings';
+import { averageRating, RATING_OPTIONS } from '../utils/ratings';
 
 /* ── Rating color helper ─────────────────────────────────── */
 const ratingColor = (rating) => {
@@ -55,7 +55,7 @@ export default function GradingPage() {
     const r = respMap[t.id];
     if (!r || !r.raw_text || !r.raw_text.trim()) return;
     const scores = r.teacher_dimension_scores || r.ai_dimension_scores;
-    if (scores) { totalAvg += avgRating(scores); topicCount++; }
+    if (scores) { totalAvg += averageRating(scores); topicCount++; }
   });
   const studentAvg = topicCount > 0 ? totalAvg / topicCount : 0;
   const badge = overallBadge(studentAvg);
@@ -80,7 +80,7 @@ export default function GradingPage() {
             const r = sm[t.id];
             if (!r || !r.raw_text || !r.raw_text.trim()) return;
             const sc = r.teacher_dimension_scores || r.ai_dimension_scores;
-            if (sc) { avg += avgRating(sc); cnt++; }
+            if (sc) { avg += averageRating(sc); cnt++; }
           });
           const stAvg = cnt > 0 ? avg / cnt : 0;
           const stBadge = overallBadge(stAvg);
@@ -173,7 +173,7 @@ export default function GradingPage() {
         {studentTopics.map(t => {
           const resp = respMap[t.id];
           const scores = resp ? (resp.teacher_dimension_scores || resp.ai_dimension_scores) : null;
-          const tAvg = avgRating(scores);
+          const tAvg = averageRating(scores);
           const tBadge = overallBadge(tAvg);
           const isExpanded = expandedTopic === t.id;
           const aiNote = resp?.ai_note || '';
@@ -392,8 +392,6 @@ function TeacherPanel({ topic, response, suggestedTags, teacherTags, allTags, re
     setSaving(false);
   };
 
-  const RATINGS = ['A+', 'A', 'A-', 'B+', 'B', 'B-'];
-
   return (
     <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-200">
       <div className="flex items-center justify-between mb-2">
@@ -414,7 +412,7 @@ function TeacherPanel({ topic, response, suggestedTags, teacherTags, allTags, re
             <div key={dim} className="flex items-center gap-2">
               <span className="text-xs text-slate-600 min-w-[60px]">{DIM_LABELS[dim] || dim}</span>
               <div className="flex gap-1">
-                {RATINGS.map(r => {
+                {RATING_OPTIONS.map(r => {
                   const rc = ratingColor(r);
                   const isSelected = current === r;
                   const isAi = aiRating === r && !isSelected;
