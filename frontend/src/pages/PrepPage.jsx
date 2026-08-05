@@ -21,54 +21,40 @@ export default function PrepPage() {
   const [lessonPlan, setLessonPlan] = useState([]);
   const [notes, setNotes] = useState({});
   const [loading, setLoading] = useState(true);
-  const [confirmed, setConfirmed] = useState(false);
-
-  const storageKey = courseId ? `weixue-prep-${courseId}` : null;
-
-  const persist = (plan, noteMap) => {
-    if (!storageKey) return;
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({ lessonPlan: plan, notes: noteMap }));
-    } catch { /* localStorage unavailable — ignore */ }
-  };
+  const [saveStatus, setSaveStatus] = useState('');
 
   useEffect(() => {
     if (!courseId) return;
     api.getPrepAnalytics(courseId)
       .then(data => {
         setAnalytics(data);
-        let saved = null;
-        try { saved = JSON.parse(localStorage.getItem(`weixue-prep-${courseId}`)); } catch { /* ignore */ }
-        if (saved && Array.isArray(saved.lessonPlan)) {
-          // Keep only topics that still exist in analytics
-          const valid = saved.lessonPlan.filter(id => data.some(d => d.topic_id === id));
-          setLessonPlan(valid);
-          setNotes(saved.notes || {});
-        } else {
-          // Auto-select topics with weak dimensions
-          setLessonPlan(data.filter(d => d.weak_dimensions.length > 0).slice(0, 3).map(d => d.topic_id));
+        const storageKey = `weixue-prep-plan-${courseId}`;
+        try {
+          const saved = JSON.parse(localStorage.getItem(storageKey));
+          if (saved && Array.isArray(saved.lessonPlan) && saved.notes && typeof saved.notes === 'object') {
+            const validTopicIds = new Set(data.map(item => item.topic_id));
+            setLessonPlan(saved.lessonPlan.filter(topicId => validTopicIds.has(topicId)));
+            setNotes(saved.notes);
+            setSaveStatus('saved');
+            return;
+          }
+        } catch (error) {
+          console.warn('无法读取本机讲评计划，将使用自动建议。', error);
         }
+        // Prefer weak topics; when all averages are above the threshold, keep the
+        // lowest-ranked topics available so the teacher can still build a plan.
+        const weakTopics = data.filter(d => d.weak_dimensions.length > 0);
+        const suggestedTopics = weakTopics.length > 0 ? weakTopics : data;
+        setLessonPlan(suggestedTopics.slice(0, 3).map(d => d.topic_id));
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [courseId]);
 
-  // Auto-save plan + notes locally so refresh doesn't lose them.
-  useEffect(() => {
-    // Skip while initial data is still loading, otherwise an empty plan
-    // would clobber previously saved state on first render.
-    if (!loading) persist(lessonPlan, notes);
-  }, [lessonPlan, notes, loading]);
-
-  const confirmPlan = () => {
-    persist(lessonPlan, notes);
-    setConfirmed(true);
-    setTimeout(() => setConfirmed(false), 2500);
-  };
-
   if (loading) return <div className="text-slate-400 py-10 text-center">加载讲评数据...</div>;
 
-  const problems = analytics.filter(a => a.weak_dimensions.length > 0 || Object.values(a.avg_dimension_scores).some(v => v < 2.5));
+  const weakProblems = analytics.filter(a => a.weak_dimensions.length > 0 || Object.values(a.avg_dimension_scores).some(v => v < 2.5));
+  const problems = weakProblems.length > 0 ? weakProblems : analytics;
   const inPlan = problems.filter(p => lessonPlan.includes(p.topic_id));
   const available = problems.filter(p => !lessonPlan.includes(p.topic_id));
 
@@ -78,6 +64,36 @@ export default function PrepPage() {
     const nl = [...lessonPlan];
     [nl[idx], nl[ni]] = [nl[ni], nl[idx]];
     setLessonPlan(nl);
+    setSaveStatus('');
+  };
+
+  const removeFromPlan = (topicId) => {
+    setLessonPlan(lessonPlan.filter(item => item !== topicId));
+    setSaveStatus('');
+  };
+
+  const addToPlan = (topicId) => {
+    setLessonPlan([...lessonPlan, topicId]);
+    setSaveStatus('');
+  };
+
+  const updateNote = (topicId, value) => {
+    setNotes({ ...notes, [topicId]: value });
+    setSaveStatus('');
+  };
+
+  const savePlan = () => {
+    if (!courseId || lessonPlan.length === 0) return;
+    try {
+      localStorage.setItem(
+        `weixue-prep-plan-${courseId}`,
+        JSON.stringify({ lessonPlan, notes, savedAt: new Date().toISOString() }),
+      );
+      setSaveStatus('saved');
+    } catch (error) {
+      console.error(error);
+      setSaveStatus('error');
+    }
   };
 
   return (
@@ -137,23 +153,30 @@ export default function PrepPage() {
                     </div>
                   )}
                   <textarea placeholder="添加讲解备注..." value={notes[topicId] || ''}
-                    onChange={e => setNotes({ ...notes, [topicId]: e.target.value })}
+                    onChange={e => updateNote(topicId, e.target.value)}
                     className="w-full text-xs border border-slate-200 rounded-md px-2.5 py-1.5 resize-none min-h-[32px] outline-none focus:ring-1 focus:ring-indigo-300" />
                 </div>
-                <button onClick={() => setLessonPlan(lessonPlan.filter(x => x !== topicId))}
+                <button onClick={() => removeFromPlan(topicId)}
                   className="text-slate-300 hover:text-red-400 text-lg cursor-pointer leading-none">×</button>
               </div>
             </div>
           );
         })}
 
-        <button
-          onClick={confirmPlan}
-          className={`w-full text-white rounded-xl py-3 font-medium text-sm cursor-pointer transition-colors
-            ${confirmed ? 'bg-green-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-        >
-          {confirmed ? '讲评计划已确认 ✓（已保存在本地）' : '确认讲评计划 →'}
-        </button>
+        <div>
+          {saveStatus && (
+            <div className={`mb-2 text-xs text-center ${saveStatus === 'error' ? 'text-red-600' : 'text-green-700'}`}>
+              {saveStatus === 'error' ? '保存失败，请检查浏览器本机存储权限。' : '讲评计划已保存到本机，刷新后仍会保留。'}
+            </div>
+          )}
+          <button
+            onClick={savePlan}
+            disabled={lessonPlan.length === 0}
+            className="w-full bg-indigo-600 text-white rounded-xl py-3 font-medium text-sm cursor-pointer hover:bg-indigo-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {saveStatus === 'saved' ? '讲评计划已确认 ✓' : '确认讲评计划 →'}
+          </button>
+        </div>
       </div>
 
       {/* Right: available topics */}
@@ -169,7 +192,7 @@ export default function PrepPage() {
                 <span key={dim} className="text-[10px] text-red-500">{DIM_LABELS[dim] || dim}</span>
               ))}
             </div>
-            <button onClick={() => setLessonPlan([...lessonPlan, cp.topic_id])}
+            <button onClick={() => addToPlan(cp.topic_id)}
               className="w-full text-xs bg-white border border-slate-200 text-slate-600 rounded-md py-1.5 cursor-pointer hover:bg-slate-100 mt-1">
               + 加入讲评
             </button>

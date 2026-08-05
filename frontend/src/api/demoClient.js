@@ -7,6 +7,7 @@
  * so we must parse them here before returning to the frontend.
  */
 import demoData from '../demo-data.json';
+import { ratingToNumber } from '../utils/ratings';
 
 const _clone = (v) => JSON.parse(JSON.stringify(v));
 const _pristine = demoData;
@@ -122,7 +123,10 @@ export const deleteStudent = (sid) => {
 
 // ── Responses ───────────────────────────────────────────
 export const getResponses = (cid, studentId) => {
-  let resps = _data.responses.map(_parseResponse);
+  const studentIds = new Set(
+    _data.students.filter(student => student.course_id === cid).map(student => student.id),
+  );
+  let resps = _data.responses.map(_parseResponse).filter(response => studentIds.has(response.student_id));
   if (studentId) resps = resps.filter(r => r.student_id === studentId);
   return ok(resps);
 };
@@ -136,15 +140,14 @@ export const deleteResponse = (rid) => {
 };
 
 export const reviewResponse = (rid, data) => {
-  const resp = _data.responses.find(r => r.id === rid);
-  if (resp) {
-    resp.teacher_dimension_scores = data.dimension_scores || null;
-    resp.teacher_confidence_override = data.confidence_override || null;
-    resp.teacher_tags = data.tags || [];
-    resp.teacher_note = data.note || '';
-    resp.teacher_reviewed = true;
-  }
-  return ok(_parseResponse(resp));
+  const response = _data.responses.find(r => r.id === rid);
+  if (!response) return Promise.reject(new Error('Response not found'));
+  response.teacher_dimension_scores = data.dimension_scores || null;
+  response.teacher_tags = data.tags || [];
+  response.teacher_note = data.note || '';
+  response.teacher_confidence_override = data.confidence_override || null;
+  response.teacher_reviewed = true;
+  return ok(_parseResponse(response));
 };
 
 export const importAudio = (cid, studentId, topicId, file) => {
@@ -198,40 +201,160 @@ export const generateComment = (cid, studentId) => {
   return ok({ student_id: studentId, draft: s?.comment_draft || '' });
 };
 export const saveCommentDraft = (cid, studentId, draft) => {
-  const s = _data.students.find(s => s.id === studentId);
-  if (s) s.comment_draft = draft;
-  return ok({ ok: true });
+  const student = _data.students.find(s => s.id === studentId && s.course_id === cid);
+  if (!student) return Promise.reject(new Error('Student not found'));
+  student.comment_draft = draft;
+  return ok({ ok: true, student_id: studentId });
 };
-export const batchGenerateComments = (cid) => {
-  const results = _data.students
-    .filter(s => s.course_id === cid && s.comment_draft)
-    .map(s => ({ student_id: s.id, student_name: s.name, draft: s.comment_draft, error: null }));
-  return ok({ results });
+export const sendComment = (cid, studentId, draft) => {
+  const student = _data.students.find(s => s.id === studentId && s.course_id === cid);
+  if (!student) return Promise.reject(new Error('Student not found'));
+  student.comment_draft = draft;
+  return ok({
+    ok: true,
+    student_id: studentId,
+    status: 'saved_pending_delivery',
+    message: '评语已保存并标记待发送；飞书机器人发送通道将在后续联调中接入。',
+  });
+};
+export const batchGenerateComments = (cid) => ok({
+  results: _data.students
+    .filter(student => student.course_id === cid)
+    .map(student => ({
+      student_id: student.id,
+      student_name: student.name,
+      draft: student.comment_draft || '',
+      error: null,
+    })),
+});
+
+// ── Prep Analytics ──────────────────────────────────────
+export const getPrepAnalytics = (cid) => {
+  const topics = _data.topics.filter(topic => topic.course_id === cid).map(_parseTopic);
+  const students = _data.students.filter(student => student.course_id === cid);
+  const studentNames = new Map(students.map(student => [student.id, student.name]));
+  const studentIds = new Set(studentNames.keys());
+  const responses = _data.responses
+    .map(_parseResponse)
+    .filter(response => studentIds.has(response.student_id));
+
+  const result = topics.map(topic => {
+    const dimensionValues = {};
+    const lowStudents = [];
+    const tagCounts = {};
+
+    responses.filter(response => response.topic_id === topic.id).forEach(response => {
+      const scores = response.teacher_dimension_scores || response.ai_dimension_scores;
+      const confidence = response.teacher_confidence_override || response.ai_confidence;
+      if (confidence === 'uncertain' && !response.teacher_dimension_scores) return;
+
+      const studentValues = [];
+      if (scores && typeof scores === 'object') {
+        Object.entries(scores).forEach(([dimension, rating]) => {
+          const value = ratingToNumber(rating);
+          if (value === null) return;
+          (dimensionValues[dimension] ||= []).push(value);
+          studentValues.push(value);
+        });
+      }
+      if (studentValues.length > 0) {
+        const average = studentValues.reduce((sum, value) => sum + value, 0) / studentValues.length;
+        if (average < 2.5) lowStudents.push(`${studentNames.get(response.student_id)}(${average.toFixed(1)})`);
+      }
+
+      const tags = response.teacher_tags || response.ai_suggested_tags || [];
+      tags.forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; });
+    });
+
+    const avgDimensionScores = Object.fromEntries(
+      Object.entries(dimensionValues).map(([dimension, values]) => [
+        dimension,
+        Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100,
+      ]),
+    );
+    return {
+      topic_id: topic.id,
+      title: topic.title,
+      topic_type: topic.topic_type,
+      cognitive_tier: topic.cognitive_tier,
+      avg_dimension_scores: avgDimensionScores,
+      weak_dimensions: Object.entries(avgDimensionScores)
+        .filter(([, average]) => average < 2.5)
+        .map(([dimension]) => dimension),
+      low_students: lowStudents,
+      error_tags: Object.entries(tagCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([tag, count]) => ({ tag, count })),
+    };
+  });
+
+  result.sort((a, b) => {
+    const aMin = Math.min(...Object.values(a.avg_dimension_scores), 5);
+    const bMin = Math.min(...Object.values(b.avg_dimension_scores), 5);
+    return aMin - bMin;
+  });
+  return ok(result);
 };
 
-// ── Prep Analytics (simplified) ─────────────────────────
-export const getPrepAnalytics = (cid) => ok([]);
-
-// ── Report (simplified) ─────────────────────────────────
+// ── Report ──────────────────────────────────────────────
 export const getClassReport = (cid) => {
-  const ratingMap = { A: 4, 'A+': 4, 'B+': 3.5, B: 3, 'C+': 2.5, C: 2, D: 1 };
-  const students = _data.students;
-  const responses = _data.responses.map(_parseResponse);
+  const students = _data.students.filter(student => student.course_id === cid);
+  const studentIds = new Set(students.map(student => student.id));
+  const topics = _data.topics.filter(topic => topic.course_id === cid).map(_parseTopic);
+  const responses = _data.responses.map(_parseResponse).filter(response => studentIds.has(response.student_id));
+
+  const topicStats = topics.map(topic => {
+    const dimensionValues = {};
+    let uncertain = 0;
+    responses.filter(response => response.topic_id === topic.id).forEach(response => {
+      const scores = response.teacher_dimension_scores || response.ai_dimension_scores;
+      const confidence = response.teacher_confidence_override || response.ai_confidence;
+      if (confidence === 'uncertain' && !response.teacher_dimension_scores) {
+        uncertain += 1;
+        return;
+      }
+      if (!scores || typeof scores !== 'object') return;
+      Object.entries(scores).forEach(([dimension, rating]) => {
+        const value = ratingToNumber(rating);
+        if (value !== null) (dimensionValues[dimension] ||= []).push(value);
+      });
+    });
+    return {
+      topic_id: topic.id,
+      title: topic.title,
+      cognitive_tier: topic.cognitive_tier,
+      avg_dimension_scores: Object.fromEntries(
+        Object.entries(dimensionValues).map(([dimension, values]) => [
+          dimension,
+          Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100,
+        ]),
+      ),
+      uncertain,
+    };
+  });
 
   const studentStats = students.map(st => {
     const vals = [];
+    let uncertain = 0;
     responses.filter(r => r.student_id === st.id).forEach(r => {
       const scores = r.teacher_dimension_scores || r.ai_dimension_scores;
+      const confidence = r.teacher_confidence_override || r.ai_confidence;
+      if (confidence === 'uncertain' && !r.teacher_dimension_scores) {
+        uncertain += 1;
+        return;
+      }
       if (scores && typeof scores === 'object') {
         Object.values(scores).forEach(rating => {
-          vals.push(ratingMap[rating] || 2);
+          const value = ratingToNumber(rating);
+          if (value !== null) vals.push(value);
         });
       }
     });
     return {
       student_id: st.id, name: st.name, grade: st.grade,
+      cognitive_tier: st.grade <= 2 ? 'basic' : st.grade <= 5 ? 'developing' : 'advancing',
       avg_score: vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 100) / 100 : 0,
-      uncertain: 0,
+      uncertain,
     };
   });
 
@@ -239,9 +362,13 @@ export const getClassReport = (cid) => {
   return ok({
     class_avg: avgs.length ? Math.round((avgs.reduce((a, b) => a + b, 0) / avgs.length) * 100) / 100 : 0,
     student_count: students.length,
-    topic_stats: [],
+    topic_stats: topicStats,
     student_stats: studentStats,
-    top_tags: _data.tags.slice(0, 10).map(t => ({ name: t.name, count: t.use_count, source: t.source })),
+    top_tags: _data.tags
+      .filter(tag => tag.course_id === cid && tag.use_count > 0)
+      .sort((a, b) => b.use_count - a.use_count)
+      .slice(0, 10)
+      .map(tag => ({ name: tag.name, count: tag.use_count, source: tag.source })),
   });
 };
 
