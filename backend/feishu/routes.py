@@ -18,7 +18,12 @@ from sqlalchemy.orm import Session
 from database import DebateTopic, Student, StudentResponse, get_db
 
 from .bot import BotService
-from .client import FeishuAPIError, FeishuClient, FeishuConfig
+from .client import (
+    FeishuAPIError,
+    FeishuClient,
+    FeishuConfig,
+    FeishuConfigurationError,
+)
 from .minutes import MinutesService
 
 router = APIRouter(prefix="/api/feishu", tags=["feishu"])
@@ -39,9 +44,23 @@ def get_client() -> FeishuClient:
     return _client
 
 
+async def close_client() -> None:
+    global _client
+    if _client is not None:
+        await _client.close()
+        _client = None
+
+
 @router.get("/health")
-def health():
-    return {"status": "ok", "feishu": _feishu_config.summary()}
+async def health():
+    minute_token = os.getenv("FEISHU_MINUTE_TOKEN", "").strip()
+    status = await get_client().health_check(minute_token)
+    return {
+        "status": status["status"],
+        "feishu": _feishu_config.summary(),
+        "auth": status,
+        "bitable": "deferred",
+    }
 
 
 @router.post("/minutes/import")
@@ -58,8 +77,8 @@ async def import_minute(
     Step 2: poll GET /api/feishu/minutes/{minute_token}/status until the
     transcript is ready (or subscribe to minutes.minute.generated_v1).
     """
-    student = db.query(Student).get(student_id)
-    topic = db.query(DebateTopic).get(topic_id)
+    student = db.get(Student, student_id)
+    topic = db.get(DebateTopic, topic_id)
     if not student or student.course_id != course_id:
         raise HTTPException(400, "student not found in course")
     if not topic or topic.course_id != course_id:
@@ -67,9 +86,10 @@ async def import_minute(
     if not _feishu_config.is_configured:
         raise HTTPException(503, "FEISHU_APP_ID / FEISHU_APP_SECRET not configured")
 
+    original_name = os.path.basename(file.filename or "audio")
     safe_name = (
         f"{course_id}_{student_id}_{topic_id}_"
-        f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename or 'audio'}"
+        f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{original_name}"
     )
     dest = os.path.join(UPLOAD_DIR, safe_name)
     with open(dest, "wb") as fh:
@@ -79,7 +99,7 @@ async def import_minute(
     try:
         file_token = await minutes.upload_media(dest)
         minute = await minutes.create_minute(file_token)
-    except FeishuAPIError as exc:
+    except (FeishuAPIError, FeishuConfigurationError) as exc:
         raise HTTPException(502, f"Feishu minutes import failed: {exc}")
 
     resp = (

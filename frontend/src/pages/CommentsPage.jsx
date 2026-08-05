@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import useStore from '../stores/gradingStore';
 import * as api from '../api/client';
-import { avgRating } from '../utils/ratings';
+import { averageRating } from '../utils/ratings';
 const ratingLabel = (avg) => {
   if (avg >= 3.5) return { text: '优秀', cls: 'text-green-600' };
   if (avg >= 2.5) return { text: '良好', cls: 'text-emerald-600' };
@@ -23,7 +23,7 @@ export default function CommentsPage() {
   const [saveStatus, setSaveStatus] = useState(''); // '' | 'saving' | 'saved'
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchResult, setBatchResult] = useState(null);
-  const [sendStatus, setSendStatus] = useState(''); // '' | 'copied'
+  const [sendStatus, setSendStatus] = useState({ kind: '', message: '' });
   const saveTimer = useRef(null);
 
   const student = students[currentStudentIdx];
@@ -56,6 +56,7 @@ export default function CommentsPage() {
   const handleDraftChange = (e) => {
     const text = e.target.value;
     setDraft(text);
+    setSendStatus({ kind: '', message: '' });
     autoSave(text);
   };
 
@@ -75,7 +76,7 @@ export default function CommentsPage() {
     const isReviewed = r.teacher_reviewed || false;
     if (isReviewed) reviewedCount++;
     if (scores) {
-      const avg = avgRating(scores);
+      const avg = averageRating(scores);
       totalAvg += avg;
       topicCount++;
       topicDetails.push({
@@ -100,18 +101,6 @@ export default function CommentsPage() {
       setDraft('生成失败，请确保已完成教师批改。');
     }
     setLoading(false);
-  };
-
-  // TODO(M4): replace clipboard copy with Feishu bot push (see 飞书集成技术方案.md §4.3).
-  const handleSend = async () => {
-    if (!draft) return;
-    try {
-      await navigator.clipboard.writeText(draft);
-      setSendStatus('copied');
-      setTimeout(() => setSendStatus(''), 2500);
-    } catch {
-      setSendStatus('');
-    }
   };
 
   const batchGenerate = async () => {
@@ -141,7 +130,7 @@ export default function CommentsPage() {
       if (!r || !r.raw_text || !r.raw_text.trim()) return;
       if (r.teacher_reviewed) reviewed++;
       const scores = r.teacher_dimension_scores || r.ai_dimension_scores;
-      if (scores) { avg += avgRating(scores); cnt++; }
+      if (scores) { avg += averageRating(scores); cnt++; }
     });
     const stAvg = cnt > 0 ? avg / cnt : 0;
     return { name: st.name, idx: i, avg: stAvg, reviewed, hasDraft: !!st.comment_draft };
@@ -152,6 +141,20 @@ export default function CommentsPage() {
     const st = students[i];
     setDraft(st?.comment_draft || '');
     setSaveStatus('');
+    setSendStatus({ kind: '', message: '' });
+  };
+
+  const send = async () => {
+    if (!student || !draft.trim() || sendStatus.kind === 'sending') return;
+    setSendStatus({ kind: 'sending', message: '正在保存最终评语...' });
+    try {
+      const result = await api.sendComment(courseId, student.id, draft.trim());
+      setSendStatus({ kind: 'sent', message: result.message });
+      await loadCourse(courseId);
+    } catch (error) {
+      console.error(error);
+      setSendStatus({ kind: 'error', message: '保存失败，请稍后重试。' });
+    }
   };
 
   return (
@@ -316,13 +319,18 @@ export default function CommentsPage() {
             )}
 
             {draft && !loading && (
-              <div className="flex gap-2 justify-end">
+              <div className="flex flex-col items-end gap-2">
+                {sendStatus.message && (
+                  <div className={`text-xs ${sendStatus.kind === 'error' ? 'text-red-600' : sendStatus.kind === 'sent' ? 'text-green-700' : 'text-slate-500'}`}>
+                    {sendStatus.message}
+                  </div>
+                )}
                 <button
-                  onClick={handleSend}
-                  className={`px-5 py-2 rounded-lg text-white text-sm font-medium cursor-pointer transition-colors
-                    ${sendStatus === 'copied' ? 'bg-green-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                  onClick={send}
+                  disabled={!draft.trim() || sendStatus.kind === 'sending'}
+                  className="px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium cursor-pointer hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {sendStatus === 'copied' ? '已复制，去飞书发送 ✓' : '发送给学生'}
+                  {sendStatus.kind === 'sending' ? '保存中...' : sendStatus.kind === 'sent' ? '已保存待发送' : '发送给学生'}
                 </button>
               </div>
             )}

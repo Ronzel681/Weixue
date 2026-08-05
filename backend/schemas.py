@@ -199,6 +199,15 @@ class CommentSaveRequest(BaseModel):
     student_id: int
     draft: str
 
+class CommentSendRequest(CommentSaveRequest):
+    pass
+
+class CommentSendOut(BaseModel):
+    ok: bool
+    student_id: int
+    status: str
+    message: str
+
 class BatchCommentOut(BaseModel):
     results: list[dict] = Field(default_factory=list)
     # [{"student_id": 1, "student_name": "小雨", "draft": "...", "error": null}, ...]

@@ -1,62 +1,83 @@
-"""Feishu Open Platform client: configuration, tenant token management, HTTP transport.
+"""Feishu OpenAPI client shared by Minutes, Bitable, and bot services.
 
-Uses plain httpx (already a project dependency) instead of the official `lark-oapi`
-SDK, so it works regardless of Python 3.14 SDK compatibility. Swapping to the SDK
-later only requires replacing the internals of `FeishuClient.request`.
+The client keeps the collaborator's generic JSON request layer while retaining
+the verified raw-text Minutes export path and explicit health contract.
 """
+
+from __future__ import annotations
 
 import asyncio
 import json
 import os
-import threading
 import time
 from typing import Any, Optional
 
 import httpx
+from dotenv import load_dotenv
+
 
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
-
-# Ensure backend/.env is loaded no matter where the server is started from.
-_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-from dotenv import load_dotenv  # noqa: E402
-
-load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
-
-# tenant_access_token invalid / expired error codes - retry once after refresh
 TOKEN_INVALID_CODES = {99991663, 99991664, 99991668, 99991661}
-# Feishu rate-limit error codes - retry with backoff
 RATE_LIMIT_CODES = {99991400, 99991401, 99991402}
 
+_BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_REPO_DIR = os.path.dirname(_BACKEND_DIR)
+load_dotenv(os.path.join(_REPO_DIR, ".env"))
+load_dotenv(os.path.join(_BACKEND_DIR, ".env"))
 
-class FeishuAPIError(Exception):
-    """Raised when a Feishu Open Platform API call fails."""
 
-    def __init__(self, code: int, msg: str, path: str = ""):
-        self.code = code
-        self.msg = msg
+class FeishuConfigurationError(RuntimeError):
+    """Raised when required Feishu credentials are absent."""
+
+
+class FeishuAPIError(RuntimeError):
+    """Normalized error for both generic OpenAPI and raw Minutes requests."""
+
+    def __init__(
+        self,
+        code_or_message: int | str,
+        msg: Optional[str] = None,
+        path: str = "",
+        *,
+        status_code: Optional[int] = None,
+        code: Optional[int] = None,
+        log_id: str = "",
+    ) -> None:
+        if isinstance(code_or_message, int):
+            self.code = code_or_message
+            self.msg = msg or ""
+            message = f"Feishu API error {self.code} ({path}): {self.msg}"
+        else:
+            self.code = code
+            self.msg = str(code_or_message)
+            message = self.msg
         self.path = path
-        super().__init__(f"Feishu API error {code} ({path}): {msg}")
+        self.status_code = status_code
+        self.log_id = log_id
+        super().__init__(message)
 
 
-def _parse_table_ids(raw: str) -> dict:
-    """Parse FEISHU_BITABLE_TABLE_IDS (JSON object like {"courses": "...", ...})."""
+def _parse_table_ids(raw: str) -> dict[str, str]:
     if not raw:
         return {}
     try:
         value = json.loads(raw)
         return value if isinstance(value, dict) else {}
-    except (ValueError, TypeError):
+    except (TypeError, ValueError):
         return {}
 
 
 class FeishuConfig:
-    """Environment-driven configuration for the Feishu integration."""
+    """Environment-driven configuration without exposing secret values."""
 
     def __init__(self) -> None:
-        self.app_id = os.getenv("FEISHU_APP_ID", "")
-        self.app_secret = os.getenv("FEISHU_APP_SECRET", "")
-        self.bitable_app_token = os.getenv("FEISHU_BITABLE_APP_TOKEN", "")
-        self.bitable_table_ids = _parse_table_ids(os.getenv("FEISHU_BITABLE_TABLE_IDS", ""))
+        self.app_id = os.getenv("FEISHU_APP_ID", "").strip()
+        self.app_secret = os.getenv("FEISHU_APP_SECRET", "").strip()
+        self.base_url = os.getenv("FEISHU_BASE_URL", FEISHU_BASE_URL).rstrip("/")
+        self.bitable_app_token = os.getenv("FEISHU_BITABLE_APP_TOKEN", "").strip()
+        self.bitable_table_ids = _parse_table_ids(
+            os.getenv("FEISHU_BITABLE_TABLE_IDS", "")
+        )
         self.verification_token = os.getenv("FEISHU_VERIFICATION_TOKEN", "")
         self.encrypt_key = os.getenv("FEISHU_ENCRYPT_KEY", "")
         self.teacher_open_id = os.getenv("FEISHU_TEACHER_OPEN_ID", "")
@@ -65,8 +86,7 @@ class FeishuConfig:
     def is_configured(self) -> bool:
         return bool(self.app_id and self.app_secret)
 
-    def summary(self) -> dict:
-        """Non-secret status snapshot used by GET /api/feishu/health."""
+    def summary(self) -> dict[str, Any]:
         return {
             "configured": self.is_configured,
             "app_id": (self.app_id[:8] + "...") if self.app_id else "",
@@ -75,62 +95,96 @@ class FeishuConfig:
         }
 
 
-class TenantTokenManager:
-    """Thread-safe cache + refresh for tenant_access_token (valid ~2 hours)."""
-
-    def __init__(self, config: FeishuConfig) -> None:
-        self.config = config
-        self._token: Optional[str] = None
-        self._expires_at: float = 0.0
-        self._lock = threading.Lock()
-
-    def get(self) -> str:
-        with self._lock:
-            if self._token and time.time() < self._expires_at - 300:
-                return self._token
-            self._token = None
-            self._refresh()
-            return self._token or ""
-
-    def invalidate(self) -> None:
-        with self._lock:
-            self._token = None
-            self._expires_at = 0.0
-
-    def _refresh(self) -> None:
-        if not self.config.is_configured:
-            raise FeishuAPIError(
-                -1,
-                "FEISHU_APP_ID / FEISHU_APP_SECRET not configured",
-                "auth/v3/tenant_access_token/internal",
-            )
-        resp = httpx.post(
-            f"{FEISHU_BASE_URL}/auth/v3/tenant_access_token/internal",
-            json={"app_id": self.config.app_id, "app_secret": self.config.app_secret},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        if payload.get("code", -1) != 0:
-            raise FeishuAPIError(
-                payload.get("code", -1),
-                payload.get("msg", "tenant token refresh failed"),
-                "auth/v3/tenant_access_token/internal",
-            )
-        self._token = payload["tenant_access_token"]
-        self._expires_at = time.time() + int(payload.get("expire", 7200))
-
-
 class FeishuClient:
-    """Async HTTP client for Feishu Open Platform server APIs."""
+    """Async Feishu client with token caching and raw transcript support."""
 
-    def __init__(self, config: Optional[FeishuConfig] = None) -> None:
+    def __init__(
+        self,
+        app_id: str | FeishuConfig = "",
+        app_secret: str = "",
+        *,
+        base_url: str = FEISHU_BASE_URL,
+        timeout: float = 20.0,
+        refresh_margin: int = 300,
+        http_client: Optional[httpx.AsyncClient] = None,
+        config: Optional[FeishuConfig] = None,
+    ) -> None:
+        if isinstance(app_id, FeishuConfig):
+            config = app_id
+            app_id = config.app_id
+            app_secret = config.app_secret
+            base_url = config.base_url
         self.config = config or FeishuConfig()
-        self.tokens = TenantTokenManager(self.config)
-        self._http = httpx.AsyncClient(timeout=60)
+        if app_id:
+            self.config.app_id = str(app_id).strip()
+        if app_secret:
+            self.config.app_secret = app_secret.strip()
+        if base_url != FEISHU_BASE_URL or not self.config.base_url:
+            self.config.base_url = base_url.rstrip("/")
+
+        self.app_id = self.config.app_id
+        self.app_secret = self.config.app_secret
+        self.base_url = self.config.base_url.rstrip("/")
+        self.refresh_margin = refresh_margin
+        self._http = http_client or httpx.AsyncClient(timeout=timeout)
+        self._owns_http_client = http_client is None
+        self._tenant_token = ""
+        self._tenant_token_expires_at = 0.0
+        self._token_lock = asyncio.Lock()
+
+    @classmethod
+    def from_env(cls) -> "FeishuClient":
+        return cls(config=FeishuConfig())
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.app_id and self.app_secret)
+
+    async def close(self) -> None:
+        if self._owns_http_client:
+            await self._http.aclose()
 
     async def aclose(self) -> None:
-        await self._http.aclose()
+        await self.close()
+
+    def _cached_token_is_valid(self) -> bool:
+        return bool(
+            self._tenant_token
+            and time.monotonic()
+            < self._tenant_token_expires_at - self.refresh_margin
+        )
+
+    async def get_tenant_access_token(self, *, force_refresh: bool = False) -> str:
+        if not self.configured:
+            raise FeishuConfigurationError(
+                "FEISHU_APP_ID and FEISHU_APP_SECRET must be configured"
+            )
+        if not force_refresh and self._cached_token_is_valid():
+            return self._tenant_token
+
+        async with self._token_lock:
+            if not force_refresh and self._cached_token_is_valid():
+                return self._tenant_token
+            response = await self._http.post(
+                f"{self.base_url}/auth/v3/tenant_access_token/internal/",
+                json={"app_id": self.app_id, "app_secret": self.app_secret},
+            )
+            payload = self._json_payload(response)
+            if response.status_code >= 400 or payload.get("code") != 0:
+                self._raise_api_error(
+                    response, payload, "Failed to obtain tenant access token"
+                )
+            token = str(payload.get("tenant_access_token") or "").strip()
+            if not token:
+                raise FeishuAPIError(
+                    "Feishu returned success without tenant_access_token",
+                    status_code=response.status_code,
+                    code=payload.get("code"),
+                )
+            expires_in = max(int(payload.get("expire") or 7200), 60)
+            self._tenant_token = token
+            self._tenant_token_expires_at = time.monotonic() + expires_in
+            return token
 
     async def request(
         self,
@@ -142,47 +196,138 @@ class FeishuClient:
         form: Optional[dict] = None,
         retries: int = 2,
     ) -> Any:
-        """Send an authenticated request and return the `data` payload.
-
-        Retries once on token-invalid errors (after refreshing the token) and
-        applies short backoff on HTTP 429 / Feishu rate-limit codes.
-        """
-        url = f"{FEISHU_BASE_URL}{path}"
+        """Call a JSON OpenAPI endpoint with auth refresh and rate retries."""
+        url = f"{self.base_url}/{path.lstrip('/')}"
         for attempt in range(retries + 1):
-            headers = {"Authorization": f"Bearer {self.tokens.get()}"}
+            token = await self.get_tenant_access_token(force_refresh=False)
+            headers = {"Authorization": f"Bearer {token}"}
             try:
-                if files is not None:
-                    resp = await self._http.request(
-                        method, url, params=params, files=files, data=form, headers=headers
-                    )
-                else:
-                    resp = await self._http.request(
-                        method, url, params=params, json=json_body, headers=headers
-                    )
+                response = await self._http.request(
+                    method,
+                    url,
+                    params=params,
+                    json=None if files is not None else json_body,
+                    files=files,
+                    data=form if files is not None else None,
+                    headers=headers,
+                )
             except httpx.HTTPError as exc:
                 raise FeishuAPIError(-1, f"network error: {exc}", path) from exc
 
-            if resp.status_code == 429:
-                await asyncio.sleep(1.5 * (attempt + 1))
-                continue
-
-            try:
-                payload = resp.json()
-            except ValueError:
-                raise FeishuAPIError(resp.status_code, f"non-JSON response: {resp.text[:200]}", path)
-
-            code = payload.get("code", 0)
-            if code == 0:
-                return payload.get("data", payload)
-
+            payload = self._json_payload(response)
+            code = payload.get("code")
+            if response.status_code == 429 or code in RATE_LIMIT_CODES:
+                if attempt < retries:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+                    continue
             if code in TOKEN_INVALID_CODES and attempt < retries:
-                self.tokens.invalidate()
+                self._tenant_token = ""
+                self._tenant_token_expires_at = 0.0
                 continue
-
-            if code in RATE_LIMIT_CODES and attempt < retries:
-                await asyncio.sleep(1.5 * (attempt + 1))
-                continue
-
-            raise FeishuAPIError(code, payload.get("msg", ""), path)
-
+            if response.status_code >= 400 or code not in (None, 0):
+                self._raise_api_error(response, payload, f"Feishu request failed: {path}")
+            if not payload:
+                raise FeishuAPIError(
+                    "Feishu JSON endpoint returned a non-JSON response",
+                    status_code=response.status_code,
+                    path=path,
+                )
+            return payload.get("data", payload)
         raise FeishuAPIError(-1, "request failed after retries", path)
+
+    async def export_minute_transcript(
+        self,
+        minute_token: str,
+        *,
+        file_format: str = "txt",
+        need_speaker: bool = True,
+        need_timestamp: bool = True,
+        access_token: Optional[str] = None,
+    ) -> str:
+        """Download a completed Minutes transcript as UTF-8 text."""
+        minute_token = minute_token.strip()
+        if not minute_token:
+            raise ValueError("minute_token is required")
+        if file_format not in {"txt", "srt"}:
+            raise ValueError("file_format must be 'txt' or 'srt'")
+        token = access_token or await self.get_tenant_access_token()
+        response = await self._http.get(
+            f"{self.base_url}/minutes/v1/minutes/{minute_token}/transcript",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            params={
+                "file_format": file_format,
+                "need_speaker": str(need_speaker).lower(),
+                "need_timestamp": str(need_timestamp).lower(),
+            },
+        )
+        if response.status_code >= 400:
+            self._raise_api_error(
+                response,
+                self._json_payload(response),
+                "Failed to export Feishu Minutes transcript",
+            )
+        return response.content.decode("utf-8-sig", errors="replace")
+
+    async def health_check(self, minute_token: str = "") -> dict[str, Any]:
+        if not self.configured:
+            return {
+                "status": "not_configured",
+                "auth": False,
+                "minute": "skipped",
+                "message": "Set FEISHU_APP_ID and FEISHU_APP_SECRET",
+            }
+        try:
+            await self.get_tenant_access_token()
+            result: dict[str, Any] = {
+                "status": "auth_ok",
+                "auth": True,
+                "minute": "skipped",
+            }
+            if minute_token:
+                transcript = await self.export_minute_transcript(minute_token)
+                result.update(
+                    status="ready",
+                    minute="ready",
+                    transcript_chars=len(transcript),
+                )
+            return result
+        except (FeishuConfigurationError, FeishuAPIError, httpx.HTTPError) as exc:
+            result = {
+                "status": "error",
+                "auth": bool(self._tenant_token),
+                "minute": "error" if minute_token else "skipped",
+                "message": str(exc),
+            }
+            if isinstance(exc, FeishuAPIError):
+                result.update(
+                    code=exc.code,
+                    status_code=exc.status_code,
+                    log_id=exc.log_id,
+                )
+            return result
+
+    @staticmethod
+    def _json_payload(response: httpx.Response) -> dict[str, Any]:
+        try:
+            payload = response.json()
+            return payload if isinstance(payload, dict) else {}
+        except ValueError:
+            return {}
+
+    @staticmethod
+    def _raise_api_error(
+        response: httpx.Response,
+        payload: dict[str, Any],
+        prefix: str,
+    ) -> None:
+        error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+        message = str(payload.get("msg") or response.reason_phrase or "unknown error")
+        raise FeishuAPIError(
+            f"{prefix}: {message}",
+            status_code=response.status_code,
+            code=payload.get("code"),
+            log_id=str(error.get("log_id") or ""),
+        )

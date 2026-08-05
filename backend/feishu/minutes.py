@@ -16,10 +16,10 @@ import os
 import time
 from typing import Optional
 
-from .client import FeishuAPIError, FeishuClient
+from .client import FeishuAPIError, FeishuClient, FeishuConfigurationError
 
 DRIVE_UPLOAD_PATH = "/drive/v1/medias/upload_all"
-MINUTE_CREATE_PATH = "/minutes/v1/minutes/upload"  # TODO(verify): exact endpoint
+MINUTE_CREATE_PATH = os.getenv("FEISHU_MINUTE_CREATE_PATH", "").strip()
 MINUTE_INFO_PATH = "/minutes/v1/minutes/{minute_token}"
 TRANSCRIPT_PATH = "/minutes/v1/minutes/{minute_token}/transcript"
 
@@ -80,6 +80,11 @@ class MinutesService:
         asynchronously, so callers should poll `get_transcript` or use the
         minutes.minute.generated_v1 event.
         """
+        if not MINUTE_CREATE_PATH:
+            raise FeishuConfigurationError(
+                "Feishu audio-to-Minutes creation endpoint is not verified; "
+                "set FEISHU_MINUTE_CREATE_PATH only after validating it in API Explorer"
+            )
         data = await self.client.request(
             "POST", MINUTE_CREATE_PATH, json_body={"file_token": file_token}
         )
@@ -94,17 +99,7 @@ class MinutesService:
 
     async def get_transcript(self, minute_token: str) -> str:
         """Fetch the speech-to-text transcript of a minute (plain text)."""
-        data = await self.client.request(
-            "GET", TRANSCRIPT_PATH.format(minute_token=minute_token)
-        )
-        if isinstance(data, str):
-            return data.strip()
-        if isinstance(data, dict):
-            for key in ("export_text", "transcript", "text", "content"):
-                value = data.get(key)
-                if value:
-                    return str(value).strip()
-        return ""
+        return (await self.client.export_minute_transcript(minute_token)).strip()
 
     async def wait_for_transcript(
         self, minute_token: str, timeout: int = 600, interval: int = 10

@@ -144,6 +144,37 @@ npm run dev                   # http://localhost:5173（自动代理到后端）
 | `ASR_MODEL` | 转写模型名称 | 按提供商自动匹配 |
 | `ASR_API_KEY` | 转写 API Key（留空复用 `LLM_API_KEY`） | — |
 
+### 飞书妙记接入（多维表格暂缓）
+
+复制 `.env.example` 为 `.env`，填入企业自建应用凭证和一条可选的已完成妙记样本：
+
+```env
+FEISHU_APP_ID=cli_xxx
+FEISHU_APP_SECRET=xxx
+FEISHU_MINUTE_TOKEN=obcnxxx
+```
+
+运行只读诊断：
+
+```bash
+cd backend
+python -m feishu.check
+python -m feishu.check --minute-token obcnxxx
+```
+
+启动后端后，`GET /api/health` 检查数据库、飞书鉴权和可选妙记样本；`GET /api/feishu/minutes/{minute_token}/transcript` 读取已完成的转写。多维表格同步在文档级权限完成前保持 `deferred`，不会伪装为已接通。
+
+### 更新纯前端 demo 数据
+
+在运行 `python seed.py` 后执行：
+
+```bash
+cd backend
+python export_demo.py
+```
+
+脚本会把当前 SQLite 数据导出到 `frontend/src/demo-data.json`。前后端统一采用 A+/A/A-/B+/B/B- 六级评分口径。
+
 ### 部署到 GitHub Pages
 
 ```bash

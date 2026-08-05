@@ -21,19 +21,19 @@ from schemas import (
     CourseCreate, CourseOut, DebateTopicCreate, DebateTopicOut,
     DebateTopicUpdate, StudentCreate, StudentUpdate, StudentBatchCreate,
     StudentOut, StudentResponseOut, TeacherReview, TextImportRequest,
-    CommentRequest, CommentOut, CommentSaveRequest, BatchCommentOut,
+    CommentRequest, CommentOut, CommentSaveRequest, CommentSendRequest, CommentSendOut,
+    BatchCommentOut,
     TopicAnalytics, TagOut, TagUpdate, TagMerge,
     RubricTemplateOut,
 )
 from grading.evaluator import AssessmentEngine
 from grading.llm import LLMClient
 from grading.rubric_loader import RubricLoader
+from feishu.routes import close_client as close_feishu_router_client
 from feishu.routes import router as feishu_router
 from asr import ASRClient, ASRError
-
-# Unified 6-level rating scale (A+/A/A-/B+/B/B-), shared by all analytics endpoints.
-# Must stay consistent with frontend/src/utils/ratings.js.
-RATING_TO_NUM = {"A+": 4.0, "A": 3.5, "A-": 3.0, "B+": 2.5, "B": 2.0, "B-": 1.0}
+from grading.ratings import rating_to_value
+from feishu import FeishuAPIError, FeishuClient, FeishuConfigurationError
 
 app = FastAPI(title="思辨星 · 少儿思辨能力认知自适应评估系统", version="0.1.0")
 
@@ -47,6 +47,7 @@ app.add_middleware(
 
 llm = LLMClient()
 evaluator = AssessmentEngine(llm)
+feishu_client = FeishuClient.from_env()
 
 app.include_router(feishu_router)
 
@@ -64,6 +65,42 @@ _progress_lock = threading.Lock()
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await feishu_client.close()
+    await close_feishu_router_client()
+
+
+@app.get("/api/health")
+async def health_check():
+    minute_token = os.getenv("FEISHU_MINUTE_TOKEN", "").strip()
+    feishu = await feishu_client.health_check(minute_token)
+    return {
+        "status": "ok" if feishu["status"] in {"auth_ok", "ready"} else "degraded",
+        "database": "ready",
+        "feishu": feishu,
+        "bitable": "deferred",
+    }
+
+
+@app.get("/api/feishu/minutes/{minute_token}/transcript")
+async def get_feishu_minute_transcript(minute_token: str):
+    try:
+        transcript = await feishu_client.export_minute_transcript(minute_token)
+        return {
+            "minute_token": minute_token,
+            "transcript": transcript,
+            "characters": len(transcript),
+        }
+    except FeishuConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except FeishuAPIError as exc:
+        raise HTTPException(
+            exc.status_code or 502,
+            {"message": str(exc), "code": exc.code, "log_id": exc.log_id},
+        ) from exc
 
 
 # ════════════════════════════════════════════════════════════
@@ -812,6 +849,24 @@ def save_comment_draft(cid: int, body: CommentSaveRequest, db: Session = Depends
     return {"ok": True, "student_id": body.student_id}
 
 
+@app.post("/api/courses/{cid}/comments/send", response_model=CommentSendOut)
+def send_comment(cid: int, body: CommentSendRequest, db: Session = Depends(get_db)):
+    """Save a final draft and mark it ready for the later robot delivery step."""
+    student = db.query(Student).get(body.student_id)
+    if not student or student.course_id != cid:
+        raise HTTPException(404, "Student not found")
+    if not body.draft.strip():
+        raise HTTPException(400, "Comment draft is empty")
+    student.comment_draft = body.draft.strip()
+    db.commit()
+    return CommentSendOut(
+        ok=True,
+        student_id=body.student_id,
+        status="saved_pending_delivery",
+        message="评语已保存并标记待发送；飞书机器人发送通道将在后续联调中接入。",
+    )
+
+
 @app.post("/api/courses/{cid}/comments/batch", response_model=BatchCommentOut)
 async def batch_generate_comments(cid: int, db: Session = Depends(get_db)):
     """Generate comments for all students who have at least one teacher-reviewed topic."""
@@ -981,7 +1036,6 @@ def prep_analytics(cid: int, db: Session = Depends(get_db)):
     topics = db.query(DebateTopic).filter(DebateTopic.course_id == cid).order_by(DebateTopic.order).all()
     students = db.query(Student).filter(Student.course_id == cid).all()
 
-    rating_map = RATING_TO_NUM
     result = []
 
     for topic in topics:
@@ -1003,16 +1057,18 @@ def prep_analytics(cid: int, db: Session = Depends(get_db)):
                 continue
 
             if scores:
-                student_avg = 0
+                student_values = []
                 for dim, rating in scores.items():
-                    val = rating_map.get(rating, 2.0)
+                    val = rating_to_value(rating)
+                    if val is None:
+                        continue
                     if dim not in dim_scores:
                         dim_scores[dim] = []
                     dim_scores[dim].append(val)
-                    student_avg += val
-                student_avg /= len(scores) if scores else 1
+                    student_values.append(val)
+                student_avg = sum(student_values) / len(student_values) if student_values else 0
 
-                if student_avg < 2.5:
+                if student_values and student_avg < 2.5:
                     weak_students.append(f"{st.name}({student_avg:.1f})")
 
             tags = resp.teacher_tags or resp.ai_suggested_tags or []
@@ -1127,8 +1183,6 @@ def class_report(cid: int, db: Session = Depends(get_db)):
     topics = db.query(DebateTopic).filter(DebateTopic.course_id == cid).order_by(DebateTopic.order).all()
     students = db.query(Student).filter(Student.course_id == cid).all()
 
-    rating_map = RATING_TO_NUM
-
     # Per-topic
     topic_stats = []
     for topic in topics:
@@ -1146,11 +1200,14 @@ def class_report(cid: int, db: Session = Depends(get_db)):
             if conf == "uncertain" and not resp.teacher_dimension_scores:
                 uncertain += 1
                 continue
-                if scores:
-                    for dim, rating in scores.items():
-                        if dim not in dim_scores:
-                            dim_scores[dim] = []
-                    dim_scores[dim].append(rating_map.get(rating, 2.0))
+            if scores:
+                for dim, rating in scores.items():
+                    value = rating_to_value(rating)
+                    if value is None:
+                        continue
+                    if dim not in dim_scores:
+                        dim_scores[dim] = []
+                    dim_scores[dim].append(value)
 
         avg_dims = {d: round(sum(v) / len(v), 2) for d, v in dim_scores.items()} if dim_scores else {}
         topic_stats.append({
@@ -1178,7 +1235,9 @@ def class_report(cid: int, db: Session = Depends(get_db)):
                 unc += 1
             elif scores:
                 for rating in scores.values():
-                    all_vals.append(rating_map.get(rating, 2.0))
+                    value = rating_to_value(rating)
+                    if value is not None:
+                        all_vals.append(value)
 
         avg_score = sum(all_vals) / len(all_vals) if all_vals else 0
         student_stats.append({
