@@ -45,7 +45,13 @@ ENTITY_TYPE_BY_TABLE = {
     "responses": "response",
 }
 
-_SOURCE_LABELS = {"manual": "手动录入", "asr": "音频转写"}
+_SOURCE_LABELS = {
+    "manual": "手动录入",
+    "teacher": "手动录入",
+    "asr": "音频转写",
+    "audio": "音频转写",
+    "student_device": "音频转写",
+}
 _TIER_LABELS = {"basic": "基础层", "developing": "发展层", "advancing": "进阶层"}
 _TYPE_LABELS = {"dilemma": "两难", "fact_opinion": "事实观点", "causal": "因果"}
 _CONFIDENCE_LABELS = {
@@ -124,7 +130,7 @@ def build_response_record(response, student, topic) -> dict:
         status = _STATUS_LABELS["assessed"]
     else:
         status = _STATUS_LABELS["pending"]
-    source = _SOURCE_LABELS.get(response.source or "", response.source or "手动录入")
+    source = _SOURCE_LABELS.get(response.source or "", "手动录入")
     confidence = _CONFIDENCE_LABELS.get(
         response.ai_confidence or "", response.ai_confidence or "不确定"
     )

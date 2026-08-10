@@ -20,14 +20,23 @@ function channelName(courseId) {
 }
 
 function ensureChannel(courseId) {
-  if (typeof BroadcastChannel !== 'undefined' && !_channel) {
-    _channel = new BroadcastChannel(channelName(courseId));
-    _channel.onmessage = (e) => {
-      const evt = e.data || {};
-      _listeners.forEach(fn => {
-        try { fn(evt); } catch (err) { console.error('[statusBus] listener error', err); }
-      });
-    };
+  const name = channelName(courseId);
+  if (typeof BroadcastChannel !== 'undefined') {
+    // Rebuild when the course changes: a singleton bound to the first course
+    // silently disconnects the cockpit from later student windows otherwise.
+    if (_channel && _channel.name !== name) {
+      try { _channel.close(); } catch { /* ignore */ }
+      _channel = null;
+    }
+    if (!_channel) {
+      _channel = new BroadcastChannel(name);
+      _channel.onmessage = (e) => {
+        const evt = e.data || {};
+        _listeners.forEach(fn => {
+          try { fn(evt); } catch (err) { console.error('[statusBus] listener error', err); }
+        });
+      };
+    }
   }
   if (!_storageHandler && typeof window !== 'undefined') {
     _storageHandler = (e) => {
@@ -54,7 +63,7 @@ export function subscribeStatus(courseId, cb) {
 
 /** Publish a status event: { responseId, status, studentId, payload }. */
 export function publishStatus(courseId, event) {
-  const payload = { ...event, ts: Date.now() };
+  const payload = { ...event, courseId, ts: Date.now() };
   const channel = ensureChannel(courseId);
   if (channel) {
     try { channel.postMessage(payload); } catch (err) { console.warn('[statusBus] postMessage failed', err); }

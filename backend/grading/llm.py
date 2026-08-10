@@ -31,12 +31,12 @@ class LLMClient:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
     ):
-        self.provider = provider or os.getenv("LLM_PROVIDER", "dashscope")
+        self.provider = provider or os.getenv("LLM_PROVIDER") or "dashscope"
         cfg = PROVIDER_CONFIG.get(self.provider, PROVIDER_CONFIG["dashscope"])
 
         self.api_key = api_key or os.getenv("LLM_API_KEY", "")
-        self.model = model or os.getenv("LLM_MODEL", cfg["default_model"])
-        self.base_url = cfg["base_url"]
+        self.model = model or os.getenv("LLM_MODEL") or cfg["default_model"]
+        self.base_url = (os.getenv("LLM_BASE_URL") or "").strip().rstrip("/") or cfg["base_url"]
 
     async def chat(
         self,

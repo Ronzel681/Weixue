@@ -41,12 +41,23 @@ export const reviewResponse = (...a) => _isDemo ? _demo.reviewResponse(...a) :
   api.post(`/responses/${a[0]}/review`, a[1]).then(r => r.data);
 
 // ── Audio import (ASR pipeline) ──────────────────────────
+const AUDIO_EXT_BY_MIME = {
+  'audio/webm': '.webm',
+  'audio/mp4': '.mp4',
+  'audio/ogg': '.ogg',
+  'audio/wav': '.wav',
+  'audio/mpeg': '.mp3',
+  'audio/aac': '.aac',
+};
 export const importAudio = (courseId, studentId, topicId, file, source) => {
   if (_isDemo) return _demo.importAudio(courseId, studentId, topicId, file, source);
   const fd = new FormData();
   fd.append('student_id', studentId);
   fd.append('topic_id', topicId);
-  fd.append('file', file);
+  // Without an explicit filename MediaRecorder blobs arrive as "blob" and the
+  // backend rejects them for missing extension — derive one from the MIME type.
+  const ext = (file && AUDIO_EXT_BY_MIME[file.type]) || '.webm';
+  fd.append('file', file, file?.name || `recording${ext}`);
   fd.append('source', source || 'audio');
   return api.post(`/courses/${courseId}/audio/import`, fd).then(r => r.data);
 };
