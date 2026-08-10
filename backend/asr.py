@@ -2,6 +2,9 @@
 
 Providers (ASR_PROVIDER env):
 - mock:      returns a canned demo transcript — offline-safe, DEFAULT
+- qwen_asr:  DashScope (百炼) qwen3-asr-flash via the OpenAI-compatible
+             chat/completions endpoint with base64 audio input; reuses
+             LLM_API_KEY / LLM_BASE_URL — one key covers LLM + ASR
 - openai:    OpenAI-compatible /audio/transcriptions (e.g. whisper-1); works when
              LLM_PROVIDER/LLM_BASE_URL exposes an audio endpoint
 - dashscope: DashScope (百炼) paraformer via the `dashscope` SDK;
@@ -13,10 +16,32 @@ raw_text enters the existing two-layer evaluation pipeline.
 """
 
 import asyncio
+import base64
 import os
 from typing import Optional
 
 import httpx
+
+# MIME types for the qwen_asr base64 data-URL input.
+MIME_BY_EXT = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".amr": "audio/amr",
+    ".wma": "audio/x-ms-wma",
+}
+
+# qwen-asr input limit is 10MB *after* base64 (~33% inflation); keep raw < 7MB.
+MAX_QWEN_ASR_BYTES = 7 * 1024 * 1024
+
+DEFAULT_ASR_MODEL = {
+    "openai": "whisper-1",
+    "dashscope": "paraformer-realtime-v2",
+    "qwen_asr": "qwen3-asr-flash",
+}
 
 # A realistic demo transcript for the 动物园 debate topics, used by the mock
 # provider so the whole upload -> transcribe -> assess flow can be demoed
@@ -37,12 +62,14 @@ class ASRClient:
         self.provider = (os.getenv("ASR_PROVIDER") or "mock").lower().strip()
         self.api_key = os.getenv("ASR_API_KEY") or os.getenv("LLM_API_KEY", "")
         self.base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
-        default_model = "whisper-1" if self.provider == "openai" else "paraformer-realtime-v2"
+        default_model = DEFAULT_ASR_MODEL.get(self.provider, "")
         self.model = os.getenv("ASR_MODEL") or default_model
 
     async def transcribe(self, file_path: str) -> str:
         if self.provider == "mock":
             return MOCK_TRANSCRIPT
+        if self.provider == "qwen_asr":
+            return await self._transcribe_qwen_asr(file_path)
         if self.provider == "openai":
             return await self._transcribe_openai(file_path)
         if self.provider == "dashscope":
@@ -57,6 +84,10 @@ class ASRClient:
         """
         if self.provider == "mock":
             return self._mock_segments()
+        if self.provider == "qwen_asr":
+            # qwen-asr returns no per-sentence timestamps; single segment.
+            text = await self._transcribe_qwen_asr(file_path)
+            return [{"start_ms": 0, "end_ms": 0, "text": text}]
         if self.provider == "openai":
             return await self._transcribe_openai_segments(file_path)
         if self.provider == "dashscope":
@@ -71,6 +102,57 @@ class ASRClient:
             cursor += max(len(text) * 450, 1800)  # ~0.45s per char, min 1.8s
             segments.append({"start_ms": start_ms, "end_ms": cursor, "text": text})
         return segments
+
+    async def _transcribe_qwen_asr(self, file_path: str) -> str:
+        """DashScope qwen3-asr-flash via OpenAI-compatible chat/completions.
+
+        Sends the local file as a base64 data URL (no public URL / OSS needed),
+        reusing LLM_API_KEY + LLM_BASE_URL — one key covers LLM and ASR.
+        """
+        if not self.api_key:
+            raise ASRError("ASR_API_KEY / LLM_API_KEY not configured")
+        if not self.model:
+            raise ASRError("ASR_MODEL not configured (expected e.g. qwen3-asr-flash)")
+        size = os.path.getsize(file_path)
+        if size > MAX_QWEN_ASR_BYTES:
+            raise ASRError(
+                f"音频过大（{size // 1024 // 1024}MB），qwen-asr 限制约 7MB 原始文件，请截短后重试"
+            )
+        mime = MIME_BY_EXT.get(os.path.splitext(file_path)[1].lower(), "application/octet-stream")
+        with open(file_path, "rb") as fh:
+            data_uri = f"data:{mime};base64,{base64.b64encode(fh.read()).decode()}"
+
+        url = f"{self.base_url or 'https://dashscope.aliyuncs.com/compatible-mode/v1'}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_audio", "input_audio": {"data": data_uri}}
+                    ],
+                }
+            ],
+            "stream": False,
+            # 课堂中文音频；不开 ITN，保留学生原话的数字表述
+            "asr_options": {"language": "zh", "enable_itn": False},
+        }
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                json=payload,
+            )
+        if resp.status_code != 200:
+            raise ASRError(f"qwen-asr failed: HTTP {resp.status_code} {resp.text[:200]}")
+        try:
+            content = resp.json()["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise ASRError("qwen-asr returned unexpected response shape")
+        text = (content or "").strip()
+        if not text:
+            raise ASRError("qwen-asr returned empty text")
+        return text
 
     async def _transcribe_openai(self, file_path: str) -> str:
         if not self.api_key:
