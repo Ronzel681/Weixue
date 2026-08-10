@@ -51,9 +51,14 @@ export default function StudentWindow({ studentId }) {
     let cancelled = false;
     (async () => {
       try {
+        // The query lives AFTER the # (e.g. .../index.html#/student/3?course=1&topic=2),
+        // so window.location.search is empty — parse it out of the hash.
+        const params = new URLSearchParams(window.location.hash.split('?')[1] || '');
         const courses = await api.getCourses();
+        const paramCid = Number(params.get('course')) || null;
+        const scopedCourses = paramCid ? courses.filter(c => c.id === paramCid) : courses;
         const allStudents = [];
-        for (const c of courses) {
+        for (const c of scopedCourses) {
           const list = await api.getStudents(c.id);
           list.forEach(s => allStudents.push({ ...s, course_id: c.id }));
         }
@@ -61,7 +66,6 @@ export default function StudentWindow({ studentId }) {
         if (!me) return;
         const cid = Number(me.course_id);
         const topics = await api.getTopics(cid);
-        const params = new URLSearchParams(window.location.search);
         const tid = Number(params.get('topic')) || topics[0]?.id || null;
         const t = topics.find(x => x.id === tid) || topics[0] || null;
         if (cancelled) return;

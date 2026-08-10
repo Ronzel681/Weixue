@@ -220,6 +220,17 @@ class AssessmentEngine:
         if confidence not in valid_confidence:
             confidence = 'uncertain'
 
+        # Empty scores with a "certain" confidence is self-contradictory:
+        # the bulk re-assessment guard treats {} != None as done (never
+        # retried), while Bitable sync's truthiness check shows 待评估.
+        # Normalize to the same shape as the failure paths so the response
+        # stays retryable and all views agree.
+        if not dimension_scores:
+            dimension_scores = None
+            confidence = 'uncertain'
+            if not note:
+                note = 'AI未返回维度分数，请重试或人工审阅。'
+
         return {
             'dimension_scores': dimension_scores,
             'confidence': confidence,

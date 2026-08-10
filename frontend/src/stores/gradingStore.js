@@ -210,6 +210,7 @@ const useStore = create((set, get) => ({
     if (_liveUnsubscribe) { _liveUnsubscribe(); _liveUnsubscribe = null; }
     _liveSubscribedCid = cid;
     _liveUnsubscribe = subscribeStatus(cid, (evt) => {
+      if (evt.courseId && evt.courseId !== cid) return;
       if (evt.response) {
         get()._upsertResponse(evt.response);
       }
@@ -310,12 +311,14 @@ const useStore = create((set, get) => ({
     try {
       const updated = await api.assessOne(responseId);
       get()._upsertResponse(updated);
-      await get().setLiveStatus(responseId, 'processed', updated);
+      // Trust the backend status: it returns 'submitted' (retryable) when the
+      // LLM produced no scores, so failures stay visible instead of green.
+      await get().setLiveStatus(responseId, updated?.processing_status || 'processed', updated);
       await get().loadDialogue(responseId);
       return updated;
     } catch (e) {
       console.warn('assessOne failed:', e);
-      await get().setLiveStatus(responseId, 'processed');
+      await get().setLiveStatus(responseId, 'submitted');
       return null;
     } finally {
       set(state => ({ liveBusy: { ...state.liveBusy, [responseId]: false } }));

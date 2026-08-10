@@ -58,7 +58,7 @@ app.include_router(feishu_router)
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".wma", ".flac"}
+ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".wma", ".flac", ".webm", ".mp4"}
 asr_client = ASRClient()
 
 # Thread-safe assessment progress tracker
@@ -319,10 +319,6 @@ async def assess_course(cid: int, background_tasks: BackgroundTasks, db: Session
     if not course:
         raise HTTPException(404, "Course not found")
 
-    with _progress_lock:
-        if _assessment_progress.get(cid, {}).get("active"):
-            raise HTTPException(409, "Assessment already in progress")
-
     topics = db.query(DebateTopic).filter(DebateTopic.course_id == cid).order_by(DebateTopic.order).all()
     students = db.query(Student).filter(Student.course_id == cid).all()
 
@@ -347,14 +343,18 @@ async def assess_course(cid: int, background_tasks: BackgroundTasks, db: Session
                 continue
             need_assessment += 1
 
+    # Check-and-claim in ONE lock block: two separate blocks let concurrent
+    # POSTs both pass the check and start duplicate assessment runs.
     with _progress_lock:
+        if _assessment_progress.get(cid, {}).get("active"):
+            raise HTTPException(409, "Assessment already in progress")
         _assessment_progress[cid] = {
             "completed": 0, "total": need_assessment, "active": True,
             "errors": 0, "llm_calls": 0, "skipped": 0,
         }
 
     background_tasks.add_task(_run_assessment, cid, students, topics)
-    return {"status": "started", "total": len(students) * len(topics), "need_assessment": need_assessment}
+    return {"status": "started", "total": need_assessment, "need_assessment": need_assessment}
 
 
 async def _run_assessment(cid: int, students, topics):
@@ -430,7 +430,12 @@ async def _run_assessment(cid: int, students, topics):
                         _assessment_progress[cid]["llm_calls"] += 1
 
                 except Exception as e:
+                    resp.cleaned_text = ""
+                    resp.ai_dimension_scores = None
                     resp.ai_confidence = "uncertain"
+                    resp.ai_reasoning = {}
+                    resp.ai_extracted_features = {}
+                    resp.ai_suggested_tags = []
                     resp.ai_note = f"AI评估异常：{e}"
                     db.commit()
                     with _progress_lock:
@@ -463,6 +468,10 @@ def assessment_progress(cid: int):
 @app.post("/api/courses/{cid}/reset")
 def reset_course(cid: int, db: Session = Depends(get_db)):
     """Reset all assessment data for this course."""
+    with _progress_lock:
+        if _assessment_progress.get(cid, {}).get("active"):
+            raise HTTPException(409, "评估进行中，请等待完成后再重置课程")
+
     responses = db.query(StudentResponse).join(Student).filter(
         Student.course_id == cid
     ).all()
@@ -483,9 +492,14 @@ def reset_course(cid: int, db: Session = Depends(get_db)):
         resp.teacher_rating = ""
         resp.processing_status = "not_started"
 
-    # Reset companion dialogue turns for the course
-    db.query(CompanionTurn).join(StudentResponse).join(Student).filter(
+    # Reset companion dialogue turns for the course.
+    # NB: Query.delete() with join() raises InvalidRequestError in
+    # SQLAlchemy 2.x — delete via a subquery of response ids instead.
+    resp_ids = db.query(StudentResponse.id).join(Student).filter(
         Student.course_id == cid
+    )
+    db.query(CompanionTurn).filter(
+        CompanionTurn.response_id.in_(resp_ids)
     ).delete(synchronize_session=False)
 
     # Reset tags: remove AI-new and teacher-created tags, reset base use_count
@@ -738,12 +752,19 @@ async def assess_one_response(rid: int, background_tasks: BackgroundTasks, db: S
         new_tags = result.get("suggested_tags", [])
         if new_tags:
             _sync_tags_to_library(db, topic.course_id, new_tags, source="ai")
-        resp.processing_status = "processed"
+        # assess_combined swallows LLM errors into a failure dict (no scores).
+        # Keep the response retryable instead of masking it as "processed".
+        resp.processing_status = "processed" if result.get("dimension_scores") else "submitted"
         db.commit()
     except Exception as e:
+        resp.cleaned_text = ""
+        resp.ai_dimension_scores = None
         resp.ai_confidence = "uncertain"
+        resp.ai_reasoning = {}
+        resp.ai_extracted_features = {}
+        resp.ai_suggested_tags = []
         resp.ai_note = f"AI评估异常：{e}"
-        resp.processing_status = "processed"
+        resp.processing_status = "submitted"
         db.commit()
 
     db.refresh(resp)
