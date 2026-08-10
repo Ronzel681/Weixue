@@ -34,11 +34,11 @@ class ASRError(Exception):
 
 class ASRClient:
     def __init__(self) -> None:
-        self.provider = os.getenv("ASR_PROVIDER", "mock").lower().strip()
+        self.provider = (os.getenv("ASR_PROVIDER") or "mock").lower().strip()
         self.api_key = os.getenv("ASR_API_KEY") or os.getenv("LLM_API_KEY", "")
         self.base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
         default_model = "whisper-1" if self.provider == "openai" else "paraformer-realtime-v2"
-        self.model = os.getenv("ASR_MODEL", default_model)
+        self.model = os.getenv("ASR_MODEL") or default_model
 
     async def transcribe(self, file_path: str) -> str:
         if self.provider == "mock":
