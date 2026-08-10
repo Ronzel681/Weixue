@@ -11,6 +11,9 @@ export default function RecordingsManager() {
   const [uploading, setUploading] = useState(false);
   const [text, setText] = useState('');
   const [msg, setMsg] = useState('');
+  const [asr, setAsr] = useState(null);           // ASR settings from backend/demo client
+  const [switchingAsr, setSwitchingAsr] = useState(false);
+  const [asrMsg, setAsrMsg] = useState('');
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -18,9 +21,44 @@ export default function RecordingsManager() {
     if (!studentId && students.length > 0) setStudentId(students[0].id);
   }, [topics, students, topicId, studentId]);
 
+  useEffect(() => {
+    api.getAsrSettings()
+      .then(setAsr)
+      .catch(() => setAsr(null));
+  }, []);
+
   const currentResp = studentId && topicId
     ? (responses[studentId] || []).find(r => r.topic_id === topicId)
     : null;
+
+  const activeProvider = asr?.providers?.find(p => p.id === asr.provider);
+
+  const switchAsr = async (provider) => {
+    const clearingDemo = provider !== 'mock' && !!asr?.demo_data_present;
+    if (clearingDemo) {
+      const confirmed = window.confirm(
+        '切换到真实转写将清除当前数据库中的演示数据（演示课程、辩题、学生、作答），确定继续？'
+      );
+      if (!confirmed) return;
+    }
+    setSwitchingAsr(true);
+    setAsrMsg('');
+    try {
+      const settings = await api.setAsrProvider(provider);
+      setAsr(settings);
+      setAsrMsg(
+        provider === 'mock'
+          ? '已切换到演示转写模式 ✓'
+          : clearingDemo
+            ? '已切换到真实转写模式 ✓（演示数据已清除）'
+            : '已切换到真实转写模式 ✓'
+      );
+    } catch (err) {
+      setAsrMsg(`切换失败：${err?.response?.data?.detail || err?.message || '未知错误'}`);
+    } finally {
+      setSwitchingAsr(false);
+    }
+  };
 
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
@@ -85,6 +123,56 @@ export default function RecordingsManager() {
         </div>
       </div>
 
+      {asr && (
+        <div className="bg-white rounded-xl p-4 border border-slate-200">
+          <div className="text-sm font-semibold text-slate-600 mb-2">转写模式</div>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => switchAsr('mock')}
+              disabled={switchingAsr || asr.provider === 'mock'}
+              className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors cursor-pointer disabled:cursor-not-allowed
+                ${asr.provider === 'mock'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              演示转写（mock）
+            </button>
+            {(asr.providers || [])
+              .filter(p => p.id !== 'mock')
+              .map(p => {
+                const active = asr.provider === p.id;
+                const blocked = !p.ready;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => switchAsr(p.id)}
+                    disabled={switchingAsr || active || blocked}
+                    title={blocked ? p.reason : ''}
+                    className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors cursor-pointer disabled:cursor-not-allowed
+                      ${active
+                        ? 'bg-indigo-600 text-white'
+                        : blocked
+                          ? 'bg-slate-50 text-slate-400'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-2 leading-relaxed">
+            {asr.demo
+              ? '当前为纯前端演示模式，真实转写需连接后端服务。'
+              : asr.provider === 'mock'
+                ? '演示转写模式：上传音频后写入内置演示文本，不调用外部语音识别 API。'
+                : activeProvider?.ready
+                  ? `真实转写已就绪：${activeProvider.label}${asr.model ? `（${asr.model}）` : ''}，上传后调用真实语音识别。`
+                  : `真实转写尚未就绪：${activeProvider?.reason || '请检查后端配置'}。`}
+          </div>
+          {asrMsg && <div className="text-[11px] text-emerald-600 mt-1">{asrMsg}</div>}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-white rounded-xl p-4 border border-slate-200">
           <div className="text-sm font-semibold text-slate-600 mb-2">上传录音</div>
@@ -106,7 +194,14 @@ export default function RecordingsManager() {
             {uploading ? '上传并转写中...' : '🎙️ 选择音频文件'}
           </button>
           <div className="text-[11px] text-slate-400 mt-2">
-            支持 mp3 / wav / m4a 等，系统自动转写（当前为演示转写模式）
+            支持 mp3 / wav / m4a 等，系统自动转写
+            {asr?.provider === 'mock'
+              ? '（当前为演示转写模式，将写入演示文本）'
+              : asr?.provider === 'dashscope'
+                ? '（DashScope 仅支持 pcm / wav / mp3 / opus / speex / aac / amr）'
+                : asr?.provider === 'qwen_asr'
+                  ? '（qwen-asr 单文件建议不超过 7MB）'
+                : '（真实转写模式）'}
           </div>
         </div>
 
