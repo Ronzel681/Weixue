@@ -29,6 +29,7 @@ MIME_BY_EXT = {
     ".m4a": "audio/mp4",
     ".aac": "audio/aac",
     ".ogg": "audio/ogg",
+    ".webm": "audio/webm",
     ".flac": "audio/flac",
     ".amr": "audio/amr",
     ".wma": "audio/x-ms-wma",
@@ -58,12 +59,18 @@ class ASRError(Exception):
 
 
 class ASRClient:
-    def __init__(self) -> None:
-        self.provider = (os.getenv("ASR_PROVIDER") or "mock").lower().strip()
+    SUPPORTED_PROVIDERS = ("mock", "qwen_asr", "openai", "dashscope")
+
+    # paraformer-realtime-v2 supports pcm/wav/mp3/opus/speex/aac/amr.
+    DASHSCOPE_FORMATS = {"pcm", "wav", "mp3", "opus", "speex", "aac", "amr"}
+
+    def __init__(self, provider: Optional[str] = None) -> None:
+        self.provider = (provider or os.getenv("ASR_PROVIDER") or "mock").lower().strip()
+        if self.provider not in self.SUPPORTED_PROVIDERS:
+            raise ASRError(f"unknown ASR_PROVIDER: {self.provider}")
         self.api_key = os.getenv("ASR_API_KEY") or os.getenv("LLM_API_KEY", "")
         self.base_url = os.getenv("LLM_BASE_URL", "").rstrip("/")
-        default_model = DEFAULT_ASR_MODEL.get(self.provider, "")
-        self.model = os.getenv("ASR_MODEL") or default_model
+        self.model = os.getenv("ASR_MODEL") or DEFAULT_ASR_MODEL.get(self.provider, "")
 
     async def transcribe(self, file_path: str) -> str:
         if self.provider == "mock":
@@ -212,7 +219,36 @@ class ASRClient:
         return result
 
     def _transcribe_dashscope(self, file_path: str) -> str:
-        # TODO(verify): exact model name / params per current 百炼 docs.
+        _, result = self._dashscope_call(file_path)
+        sentences = result.get_sentence() or []
+        text = "".join((s.get("text") or "") for s in sentences).strip()
+        if not text:
+            raise ASRError("dashscope ASR returned empty text")
+        return text
+
+    def _transcribe_dashscope_segments(self, file_path: str) -> list[dict]:
+        _, result = self._dashscope_call(file_path)
+        segments = []
+        for sentence in result.get_sentence() or []:
+            text = (sentence.get("text") or "").strip()
+            if not text:
+                continue
+            segments.append({
+                "start_ms": int(sentence.get("begin_time", 0)),
+                "end_ms": int(sentence.get("end_time", 0)),
+                "text": text,
+            })
+        if not segments:
+            raise ASRError("dashscope ASR returned empty segments")
+        return segments
+
+    def _dashscope_call(self, file_path: str):
+        """Non-streaming local-file recognition (see 百炼 paraformer Python SDK docs).
+
+        Correct usage is `Recognition(model=..., format=..., sample_rate=...,
+        callback=None).call(local_file_path)` — passing a local path via
+        `file_urls` (the old code) only works for publicly reachable URLs.
+        """
         try:
             import dashscope
             from dashscope.audio.asr import Recognition
@@ -220,21 +256,24 @@ class ASRClient:
             raise ASRError("dashscope SDK not installed — run: pip install dashscope")
         if not self.api_key:
             raise ASRError("ASR_API_KEY / LLM_API_KEY not configured")
+        ext = os.path.splitext(file_path)[1].lstrip(".").lower()
+        if ext not in self.DASHSCOPE_FORMATS:
+            raise ASRError(
+                f"dashscope paraformer does not support .{ext} "
+                f"(supported: {sorted(self.DASHSCOPE_FORMATS)})"
+            )
         dashscope.api_key = self.api_key
-        result = Recognition.call(
+        recognition = Recognition(
             model=self.model,
-            file_urls=[file_path],
-            format=os.path.splitext(file_path)[1].lstrip("."),
+            format=ext,
             sample_rate=16000,
+            language_hints=["zh"],
+            callback=None,
         )
+        result = recognition.call(file_path)
         if result.status_code != 200:
-            raise ASRError(f"dashscope ASR failed: {result.status_code} {getattr(result, 'code', '')} {getattr(result, 'message', '')}")
-        text = (result.get_sentence() or "").strip()
-        if not text:
-            raise ASRError("dashscope ASR returned empty text")
-        return text
-
-    def _transcribe_dashscope_segments(self, file_path: str) -> list[dict]:
-        # TODO(verify): parse per-sentence timestamps from the dashscope result.
-        text = self._transcribe_dashscope(file_path)
-        return [{"start_ms": 0, "end_ms": 0, "text": text}]
+            raise ASRError(
+                f"dashscope ASR failed: {result.status_code} "
+                f"{getattr(result, 'code', '')} {getattr(result, 'message', '')}"
+            )
+        return recognition, result

@@ -282,3 +282,23 @@ class TagUpdate(BaseModel):
 class TagMerge(BaseModel):
     keep_id: int
     merge_ids: list[int]
+
+
+# ── ASR settings ───────────────────────────────────────────
+
+class ASRProviderInfo(BaseModel):
+    id: str
+    label: str
+    ready: bool = False
+    reason: str = ""
+
+class ASRSettingOut(BaseModel):
+    provider: str
+    model: str = ""
+    api_key_configured: bool = False
+    providers: list[ASRProviderInfo] = Field(default_factory=list)
+    demo: bool = False
+    demo_data_present: bool = False
+
+class ASRSettingUpdate(BaseModel):
+    provider: str

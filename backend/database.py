@@ -269,6 +269,20 @@ class AudioRecording(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SystemSetting(Base):
+    """Simple key-value settings persisted in the database.
+
+    Used for runtime toggles such as the ASR provider selection, so a teacher
+    can switch between mock (demo) and a real speech-recognition provider
+    without editing environment variables or restarting the server.
+    """
+
+    __tablename__ = "system_settings"
+
+    key = Column(String(80), primary_key=True)
+    value = Column(Text, default="")
+
+
 class FeishuBinding(Base):
     """Maps a local entity to a Feishu Bitable record (one-way sync).
 

@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from database import (
     init_db, SessionLocal, Course, DebateTopic, Student,
     StudentResponse, RubricTemplate, CalibrationRecord, DimensionTag,
-    get_cognitive_tier,
+    SystemSetting, get_cognitive_tier,
 )
 
 # Chinese corner brackets used as quotation marks inside Python strings
@@ -724,16 +724,27 @@ def seed(force=False):
         db.query(DimensionTag).delete()
         db.query(Course).delete()
         db.query(RubricTemplate).delete()
+        db.query(SystemSetting).filter(SystemSetting.key.like("demo_%")).delete()
         db.commit()
 
-    # Create Rubric Templates
+    # Create Rubric Templates. Reuse existing rows (keyed by cognitive_tier) so
+    # seeding still works on a database that already has the global templates —
+    # e.g. after a real-mode purge removed only the demo course.
     template_map = {}
+    existing_templates = {
+        t.cognitive_tier: t for t in db.query(RubricTemplate).all()
+    }
     for t_data in RUBRIC_TEMPLATES:
+        tier = t_data['cognitive_tier']
+        if tier in existing_templates:
+            template_map[tier] = existing_templates[tier]
+            print(f"  Reused rubric template: {tier} ({t_data['grade_range']})")
+            continue
         template = RubricTemplate(**t_data)
         db.add(template)
         db.flush()
-        template_map[t_data['cognitive_tier']] = template
-        print(f"  Created rubric template: {t_data['cognitive_tier']} ({t_data['grade_range']})")
+        template_map[tier] = template
+        print(f"  Created rubric template: {tier} ({t_data['grade_range']})")
 
     # Create Course
     course = Course(**COURSE)
@@ -828,6 +839,15 @@ def seed(force=False):
             created_at=datetime.utcnow() - timedelta(days=len(CALIBRATION_SEEDS) - i),
         )
         db.add(record)
+
+    # Mark this course as demo/seed data so switching to real ASR mode can
+    # purge exactly the demo content (never real teacher data).
+    marker = db.get(SystemSetting, "demo_course_id")
+    if marker is None:
+        marker = SystemSetting(key="demo_course_id", value=str(cid))
+        db.add(marker)
+    else:
+        marker.value = str(cid)
 
     db.commit()
 

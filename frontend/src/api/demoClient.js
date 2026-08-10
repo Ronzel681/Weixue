@@ -253,6 +253,39 @@ export const importText = (cid, studentId, topicId, text, source) => {
   return ok(_parseResponse(resp));
 };
 
+// ── ASR settings (demo mode: choice is local-only; real providers need a backend) ──
+const ASR_STORAGE_KEY = 'weixue-asr-provider-v1';
+const DEMO_ASR_PROVIDERS = [
+  { id: 'mock', label: '演示转写（mock）', ready: true, reason: '' },
+  { id: 'qwen_asr', label: '百炼 qwen3-asr-flash（推荐）', ready: false, reason: '纯前端演示模式无真实 ASR，需连接后端' },
+  { id: 'openai', label: 'OpenAI 兼容（whisper）', ready: false, reason: '纯前端演示模式无真实 ASR，需连接后端' },
+  { id: 'dashscope', label: 'DashScope 百炼（paraformer）', ready: false, reason: '纯前端演示模式无真实 ASR，需连接后端' },
+];
+
+const _demoAsrSettings = () => {
+  let provider = 'mock';
+  try {
+    provider = localStorage.getItem(ASR_STORAGE_KEY) || 'mock';
+  } catch { /* storage unavailable */ }
+  if (!DEMO_ASR_PROVIDERS.some(p => p.id === provider)) provider = 'mock';
+  return ok({
+    provider,
+    model: '',
+    api_key_configured: false,
+    providers: DEMO_ASR_PROVIDERS,
+    demo: true,
+    demo_data_present: false,
+  });
+};
+
+export const getAsrSettings = () => _demoAsrSettings();
+export const setAsrProvider = (provider) => {
+  try {
+    localStorage.setItem(ASR_STORAGE_KEY, provider);
+  } catch { /* storage unavailable */ }
+  return _demoAsrSettings();
+};
+
 // ── AI Companion (demo simulation) ─────────────────────
 export const updateResponseStatus = (rid, status) => {
   const resp = _data.responses.find(r => r.id === rid);

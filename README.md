@@ -52,7 +52,7 @@ AI 评估不应该"忘掉"教师的修正偏好。每当教师在批改页覆盖
 ## 功能模块
 
 - **班级管理**：管理大页下三个独立子页——辩题管理（增删改/排序）、学生管理（单个/批量添加）、录音录入（上传音频或粘贴转写文本），支持辩题↔学生双向查看与移除。
-- **音频转写**：可插拔 ASR（演示 mock / OpenAI / DashScope），课堂录音自动转写进入评估流水线。
+- **音频转写**：可插拔 ASR（演示 mock / 百炼 qwen_asr / OpenAI / DashScope），前端可在演示与真实转写间一键切换，课堂录音自动转写进入评估流水线。
 - **智能评估**：AI 按认知梯度 rubric 批量评估，每个维度给出六级评级 + 推理链 + 建议标签。教师逐份审阅，可覆盖任意维度的评分。
 - **评语生成**：基于教师确认的评分、标签和批注，LLM 生成个性化评语草稿。教师编辑后发送，支持批量生成。
 - **备课辅助**：按辩题聚合评估数据，识别班级薄弱维度和低分学生，辅助讲评课备课。
@@ -66,7 +66,7 @@ AI 评估不应该"忘掉"教师的修正偏好。每当教师在批改页覆盖
 | 后端 | FastAPI + Uvicorn + SQLAlchemy |
 | 数据库 | SQLite |
 | LLM | OpenAI SDK（兼容 DashScope / DeepSeek / OpenAI） |
-| ASR | 可插拔（mock / OpenAI / DashScope），详见 [音频录入与转写.md](./音频录入与转写.md) |
+| ASR | 可插拔（mock / qwen_asr / OpenAI / DashScope），详见 [音频录入与转写.md](./音频录入与转写.md) |
 | 前端 | React 18 + Vite + Zustand + Tailwind CSS |
 | 部署 | GitHub Pages（纯前端 demo 模式）/ FastAPI + 前端静态托管 |
 
@@ -79,7 +79,7 @@ Weixue/
 │   ├── database.py            # SQLAlchemy 数据模型
 │   ├── schemas.py             # Pydantic 请求/响应模型
 │   ├── seed.py                # 演示数据填充
-│   ├── asr.py                 # 音频转写抽象层（mock / openai / dashscope）
+│   ├── asr.py                 # 音频转写抽象层（mock / qwen_asr / openai / dashscope）
 │   ├── grading/
 │   │   ├── evaluator.py       # 双层流水线（Layer1 文本清洗 + Layer2 维度评估）
 │   │   ├── rubric_loader.py   # Rubric 模板加载 + prompt 组装 + 校准注入
@@ -140,7 +140,7 @@ npm run dev                   # http://localhost:5173（自动代理到后端）
 | `LLM_API_KEY` | API Key | — |
 | `LLM_MODEL` | 模型名称 | 按提供商自动匹配 |
 | `LLM_BASE_URL` | API 地址（可选） | — |
-| `ASR_PROVIDER` | 音频转写提供商 | `mock`（演示保底）/ `openai` / `dashscope` |
+| `ASR_PROVIDER` | 音频转写提供商 | `mock`（演示保底）/ `qwen_asr`（推荐）/ `openai` / `dashscope` |
 | `ASR_MODEL` | 转写模型名称 | 按提供商自动匹配 |
 | `ASR_API_KEY` | 转写 API Key（留空复用 `LLM_API_KEY`） | — |
 

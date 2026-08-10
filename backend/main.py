@@ -3,6 +3,7 @@
 import os
 from datetime import datetime
 from typing import Optional
+import uuid
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +16,7 @@ from database import (
     get_db, init_db, SessionLocal,
     Course, DebateTopic, Student, StudentResponse,
     RubricTemplate, CalibrationRecord, DimensionTag, AudioRecording, CompanionTurn,
+    SystemSetting, FeishuBinding,
     get_cognitive_tier,
 )
 from schemas import (
@@ -26,6 +28,7 @@ from schemas import (
     TopicAnalytics, TagOut, TagUpdate, TagMerge,
     RubricTemplateOut,
     CompanionTurnCreate, CompanionTurnOut, StatusUpdate, SuggestTurnOut,
+    ASRProviderInfo, ASRSettingOut, ASRSettingUpdate,
 )
 from grading.evaluator import AssessmentEngine
 from grading.llm import LLMClient
@@ -58,8 +61,201 @@ app.include_router(feishu_router)
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".amr", ".wma", ".flac", ".webm", ".mp4"}
-asr_client = ASRClient()
+ALLOWED_AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".webm", ".mp4", ".amr", ".wma", ".flac"}
+
+ASR_PROVIDER_LABELS = {
+    "mock": "演示转写（mock）",
+    "qwen_asr": "百炼 qwen3-asr-flash（推荐）",
+    "openai": "OpenAI 兼容（whisper）",
+    "dashscope": "DashScope 百炼（paraformer）",
+}
+
+
+def get_asr_provider(db: Session) -> str:
+    """Current ASR provider: DB setting first, then ASR_PROVIDER env, then mock."""
+    row = db.get(SystemSetting, "asr_provider")
+    if row and row.value.strip():
+        return row.value.strip().lower()
+    return (os.getenv("ASR_PROVIDER") or "mock").lower().strip()
+
+
+def _asr_provider_info(provider: str, api_key_configured: bool) -> ASRProviderInfo:
+    reason = ""
+    if provider == "mock":
+        ready = True
+    elif provider == "qwen_asr":
+        ready = bool(api_key_configured)
+        if not ready:
+            reason = "未配置 ASR_API_KEY / LLM_API_KEY"
+    elif provider == "openai":
+        ready = bool(api_key_configured)
+        if not ready:
+            reason = "未配置 ASR_API_KEY / LLM_API_KEY"
+    elif provider == "dashscope":
+        try:
+            import importlib.util
+            has_sdk = importlib.util.find_spec("dashscope") is not None
+        except Exception:
+            has_sdk = False
+        ready = bool(api_key_configured) and has_sdk
+        if not api_key_configured:
+            reason = "未配置 ASR_API_KEY / LLM_API_KEY"
+        elif not has_sdk:
+            reason = "未安装 dashscope SDK（pip install dashscope）"
+    else:
+        ready = False
+        reason = f"未知 provider: {provider}"
+    return ASRProviderInfo(
+        id=provider,
+        label=ASR_PROVIDER_LABELS.get(provider, provider),
+        ready=ready,
+        reason=reason,
+    )
+
+
+def build_asr_settings(db: Session) -> ASRSettingOut:
+    current = get_asr_provider(db)
+    api_key_configured = bool(os.getenv("ASR_API_KEY") or os.getenv("LLM_API_KEY", ""))
+    try:
+        client = ASRClient(provider=current)
+    except ASRError:
+        # A bad env/DB value must not take down the settings endpoint.
+        current = "mock"
+        client = ASRClient(provider=current)
+    demo_data_present = False
+    marker = db.get(SystemSetting, "demo_course_id")
+    if marker and marker.value.strip():
+        try:
+            demo_data_present = db.get(Course, int(marker.value.strip())) is not None
+        except ValueError:
+            demo_data_present = False
+    return ASRSettingOut(
+        provider=current,
+        model=client.model,
+        api_key_configured=api_key_configured,
+        providers=[
+            _asr_provider_info(p, api_key_configured)
+            for p in ASRClient.SUPPORTED_PROVIDERS
+        ],
+        demo=False,
+        demo_data_present=demo_data_present,
+    )
+
+
+def purge_demo_data(db: Session) -> dict:
+    """Delete the seed/demo course (marked by seed.py) and all its content.
+
+    Only the course recorded in system_settings['demo_course_id'] is touched,
+    so real teacher data in other courses is never affected. Physical audio
+    files of the demo recordings are removed too.
+    """
+    marker = db.get(SystemSetting, "demo_course_id")
+    if not marker or not marker.value.strip():
+        return {"purged": False}
+    try:
+        course_id = int(marker.value.strip())
+    except ValueError:
+        return {"purged": False}
+    course = db.get(Course, course_id)
+    if course is None:
+        db.delete(marker)
+        db.commit()
+        return {"purged": False}
+
+    student_ids = [
+        s.id for s in db.query(Student).filter(Student.course_id == course_id).all()
+    ]
+    topic_ids = [
+        t.id for t in db.query(DebateTopic).filter(DebateTopic.course_id == course_id).all()
+    ]
+    resp_ids: set[int] = set()
+    if student_ids:
+        resp_ids.update(
+            r.id for r in db.query(StudentResponse)
+            .filter(StudentResponse.student_id.in_(student_ids)).all()
+        )
+    if topic_ids:
+        resp_ids.update(
+            r.id for r in db.query(StudentResponse)
+            .filter(StudentResponse.topic_id.in_(topic_ids)).all()
+        )
+
+    summary = {
+        "purged": True,
+        "course_id": course_id,
+        "responses": len(resp_ids),
+        "topics": len(topic_ids),
+        "students": len(student_ids),
+        "recordings": 0,
+        "calibrations": 0,
+        "turns": 0,
+        "tags": 0,
+    }
+
+    if resp_ids:
+        resp_list = list(resp_ids)
+        summary["calibrations"] = (
+            db.query(CalibrationRecord)
+            .filter(CalibrationRecord.response_id.in_(resp_list))
+            .delete(synchronize_session=False)
+        )
+        summary["turns"] = (
+            db.query(CompanionTurn)
+            .filter(CompanionTurn.response_id.in_(resp_list))
+            .delete(synchronize_session=False)
+        )
+        db.query(StudentResponse).filter(StudentResponse.id.in_(resp_list)).delete(
+            synchronize_session=False
+        )
+
+    recordings = (
+        db.query(AudioRecording).filter(AudioRecording.course_id == course_id).all()
+    )
+    file_paths = [rec.file_path for rec in recordings]
+    summary["recordings"] = len(recordings)
+    for rec in recordings:
+        db.delete(rec)
+
+    if student_ids:
+        db.query(Student).filter(Student.id.in_(student_ids)).delete(
+            synchronize_session=False
+        )
+    if topic_ids:
+        db.query(DebateTopic).filter(DebateTopic.id.in_(topic_ids)).delete(
+            synchronize_session=False
+        )
+    summary["tags"] = (
+        db.query(DimensionTag).filter(DimensionTag.course_id == course_id).delete(
+            synchronize_session=False
+        )
+    )
+
+    entity_pairs = [("course", course_id)]
+    entity_pairs += [("topic", tid) for tid in topic_ids]
+    entity_pairs += [("student", sid) for sid in student_ids]
+    entity_pairs += [("response", rid) for rid in resp_ids]
+    for entity_type, entity_id in entity_pairs:
+        db.query(FeishuBinding).filter(
+            FeishuBinding.entity_type == entity_type,
+            FeishuBinding.entity_id == entity_id,
+        ).delete(synchronize_session=False)
+
+    db.delete(course)
+    db.delete(marker)
+    db.commit()
+
+    for path in file_paths:
+        _remove_audio_file(path)
+    return summary
+
+
+def seed_demo_if_empty(db: Session) -> bool:
+    """Re-seed the demo course when the database has no courses at all."""
+    if db.query(Course).count() > 0:
+        return False
+    import seed as seed_module
+    seed_module.seed(force=False)
+    return True
 
 # Thread-safe assessment progress tracker
 _assessment_progress = {}
@@ -87,6 +283,39 @@ async def health_check():
         "feishu": feishu,
         "bitable": bitable_status(feishu_client.config),
     }
+
+
+@app.get("/api/settings/asr", response_model=ASRSettingOut)
+def get_asr_settings(db: Session = Depends(get_db)):
+    """Current ASR mode (mock vs real provider) and per-provider readiness."""
+    return build_asr_settings(db)
+
+
+@app.post("/api/settings/asr", response_model=ASRSettingOut)
+def set_asr_settings(body: ASRSettingUpdate, db: Session = Depends(get_db)):
+    """Persist the ASR provider selection (mock | openai | dashscope).
+
+    Real providers must not share the database with demo/seed data: switching
+    to openai/dashscope purges the marked demo course, and switching back to
+    mock re-seeds it when the database is otherwise empty.
+    """
+    provider = body.provider.strip().lower()
+    if provider not in ASRClient.SUPPORTED_PROVIDERS:
+        raise HTTPException(
+            400, f"invalid ASR provider: {provider} (allowed: {ASRClient.SUPPORTED_PROVIDERS})"
+        )
+    if provider != "mock":
+        purge_demo_data(db)
+    elif provider == "mock":
+        seed_demo_if_empty(db)
+    row = db.get(SystemSetting, "asr_provider")
+    if row is None:
+        row = SystemSetting(key="asr_provider", value=provider)
+        db.add(row)
+    else:
+        row.value = provider
+    db.commit()
+    return build_asr_settings(db)
 
 
 @app.get("/api/feishu/minutes/{minute_token}/transcript")
@@ -776,6 +1005,16 @@ async def assess_one_response(rid: int, background_tasks: BackgroundTasks, db: S
 # Audio import (ASR pipeline — independent of Feishu Minutes)
 # ════════════════════════════════════════════════════════════
 
+
+def _remove_audio_file(file_path: str) -> None:
+    """Best-effort removal of an uploaded audio file (never raises)."""
+    try:
+        if file_path and os.path.isfile(file_path):
+            os.remove(file_path)
+    except OSError:
+        pass
+
+
 @app.post("/api/courses/{cid}/audio/import", response_model=StudentResponseOut)
 async def import_audio(
     cid: int,
@@ -800,14 +1039,24 @@ async def import_audio(
             400, f"unsupported audio type: {ext} (allowed: {sorted(ALLOWED_AUDIO_EXT)})"
         )
 
-    safe_name = f"{cid}_{student_id}_{topic_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+    safe_name = (
+        f"{cid}_{student_id}_{topic_id}_"
+        f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:6]}{ext}"
+    )
     dest = os.path.join(UPLOAD_DIR, safe_name)
     with open(dest, "wb") as fh:
         fh.write(await file.read())
 
-    recording = AudioRecording(course_id=cid, topic_id=topic.id, file_path=dest)
-    db.add(recording)
-    db.flush()
+    # Transcribe before touching the database: a failed transcription must not
+    # leave an empty StudentResponse, an AudioRecording row, or an orphan file.
+    try:
+        transcript = await ASRClient(provider=get_asr_provider(db)).transcribe(dest)
+    except ASRError as exc:
+        _remove_audio_file(dest)
+        raise HTTPException(502, f"转写失败：{exc}")
+    except Exception as exc:
+        _remove_audio_file(dest)
+        raise HTTPException(500, f"转写异常：{exc}")
 
     resp = (
         db.query(StudentResponse)
@@ -822,17 +1071,19 @@ async def import_audio(
             student_id=student_id, topic_id=topic_id, raw_text="", source=source
         )
         db.add(resp)
-    resp.audio_recording_id = recording.id
-    resp.processing_status = "processing"
-    db.commit()
 
-    try:
-        transcript = await asr_client.transcribe(dest)
-    except ASRError as exc:
-        resp.source = source
-        resp.processing_status = "submitted"
-        db.commit()
-        raise HTTPException(502, f"转写失败：{exc}")
+    # Re-uploading for the same student×topic replaces the old recording —
+    # remove both its DB row and its physical file so nothing is orphaned.
+    if resp.audio_recording_id:
+        old = db.get(AudioRecording, resp.audio_recording_id)
+        if old:
+            _remove_audio_file(old.file_path)
+            db.delete(old)
+
+    recording = AudioRecording(course_id=cid, topic_id=topic.id, file_path=dest)
+    db.add(recording)
+    db.flush()
+    resp.audio_recording_id = recording.id
 
     # A new transcript invalidates the previous assessment
     resp.raw_text = transcript
@@ -911,13 +1162,14 @@ async def import_text(
 @app.delete("/api/responses/{rid}")
 def delete_response(rid: int, db: Session = Depends(get_db)):
     """Delete a single student response — removes the student from that topic.
-    Cascades calibration records and the linked audio recording row."""
+    Cascades calibration records and the linked audio recording row + file."""
     resp = db.query(StudentResponse).get(rid)
     if not resp:
         raise HTTPException(404, "Response not found")
     if resp.audio_recording_id:
         rec = db.get(AudioRecording, resp.audio_recording_id)
         if rec:
+            _remove_audio_file(rec.file_path)
             db.delete(rec)
     db.delete(resp)  # cascades calibrations via the relationship
     db.commit()

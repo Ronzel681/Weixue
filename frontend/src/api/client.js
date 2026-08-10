@@ -66,6 +66,12 @@ export const importText = (courseId, studentId, topicId, text, source) => _isDem
   : api.post(`/courses/${courseId}/responses/text`, {
       student_id: studentId, topic_id: topicId, text, source: source || 'manual',
     }).then(r => r.data);
+export const getAsrSettings = () => _isDemo
+  ? _demo.getAsrSettings()
+  : api.get('/settings/asr').then(r => r.data);
+export const setAsrProvider = (provider) => _isDemo
+  ? _demo.setAsrProvider(provider)
+  : api.post('/settings/asr', { provider }).then(r => r.data);
 
 // ── AI Companion (live classroom) ──────────────────────
 export const suggestTurn = (rid) => _isDemo
