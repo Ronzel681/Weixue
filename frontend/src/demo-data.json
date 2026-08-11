@@ -5,7 +5,7 @@
       "title": "动物应该养在动物园吗？",
       "class_name": "思辨提升班（混龄）",
       "grade_level": 4,
-      "created_at": "2026-08-11T05:56:32.733214"
+      "created_at": "2026-08-11T10:05:07.261941"
     }
   ],
   "topics": [
@@ -16,13 +16,7 @@
       "topic_type": "dilemma",
       "cognitive_tier": "basic",
       "stimulus_material": "一只老鹰在山上受伤了，被人送到了动物救助站。经过治疗，老鹰的伤好了。现在有两个选择：把它放回大自然，让它重新飞翔；或者让它留在动物园里，因为动物园里有吃的、有医生，很安全。如果你是这只老鹰，你会怎么选？",
-      "reference_arguments": [
-        "放回野外：老鹰属于天空，自由是最重要的",
-        "放回野外：它已经康复了，可以自己捕食",
-        "留在动物园：野外很危险，可能再次受伤",
-        "留在动物园：动物园有稳定的食物来源",
-        "留在动物园：在动物园还能让小朋友看到老鹰，学到知识"
-      ],
+      "reference_arguments": "[\"放回野外：老鹰属于天空，自由是最重要的\", \"放回野外：它已经康复了，可以自己捕食\", \"留在动物园：野外很危险，可能再次受伤\", \"留在动物园：动物园有稳定的食物来源\", \"留在动物园：在动物园还能让小朋友看到老鹰，学到知识\"]",
       "rubric_template_id": 1,
       "max_score": 10,
       "order": 1
@@ -34,11 +28,7 @@
       "topic_type": "fact_opinion",
       "cognitive_tier": "developing",
       "stimulus_material": "有人说，动物园最重要的任务是保护那些快要灭绝的动物，比如大熊猫、东北虎。也有人说，动物园其实是为了让人观赏、赚钱。还有人认为，动物园对动物的教育意义最重要——让城里的孩子认识动物。请你想一想：“动物园的存在主要是为了保护濒危动物”，这句话是事实还是观点？",
-      "reference_arguments": [
-        "这是观点：因为动物园还有观赏、教育、科研等多种功能，说“主要是保护”是一种价值判断",
-        "部分事实：确实有很多动物园参与了濒危动物繁殖项目",
-        "区分方法：事实是可以验证的（如“某动物园繁殖了多少只大熊猫”），观点是带有“应该”“主要”等价值判断的"
-      ],
+      "reference_arguments": "[\"这是观点：因为动物园还有观赏、教育、科研等多种功能，说“主要是保护”是一种价值判断\", \"部分事实：确实有很多动物园参与了濒危动物繁殖项目\", \"区分方法：事实是可以验证的（如“某动物园繁殖了多少只大熊猫”），观点是带有“应该”“主要”等价值判断的\"]",
       "rubric_template_id": 2,
       "max_score": 10,
       "order": 2
@@ -50,13 +40,7 @@
       "topic_type": "causal",
       "cognitive_tier": "advancing",
       "stimulus_material": "一项调查显示，78%的家长认为带孩子去动物园有助于培养孩子的爱心。但动物保护组织的一位专家表示：“仅靠看动物园里的动物，不足以让孩子真正理解动物保护。”还有人说：“看了笼子里的动物，孩子反而觉得动物就是被关着给人看的。”请分析“去过动物园的孩子更爱护动物”这个因果关系是否成立。",
-      "reference_arguments": [
-        "支持因果：接触动物能激发好奇心和同理心",
-        "支持因果：看到真实的动物比看书本印象更深",
-        "质疑因果：相关性不等于因果性——爱护动物的孩子可能本来就更想去动物园",
-        "质疑因果：动物园的展示方式（笼中动物）可能传递错误的动物观",
-        "深层分析：取决于动物园的教育质量和参观方式，而非“去过”本身"
-      ],
+      "reference_arguments": "[\"支持因果：接触动物能激发好奇心和同理心\", \"支持因果：看到真实的动物比看书本印象更深\", \"质疑因果：相关性不等于因果性——爱护动物的孩子可能本来就更想去动物园\", \"质疑因果：动物园的展示方式（笼中动物）可能传递错误的动物观\", \"深层分析：取决于动物园的教育质量和参观方式，而非“去过”本身\"]",
       "rubric_template_id": 3,
       "max_score": 10,
       "order": 3
@@ -141,21 +125,16 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "清晰性": "B+",
-        "解释力": "A-",
-        "证据意识": "A-"
-      },
-      "teacher_confidence_override": null,
-      "teacher_tags": [
-        "能自发考虑反方观点",
-        "情感投入丰富",
-        "有简单因果推理"
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [
+        "有新意"
       ],
+      "teacher_dimension_scores": "{\"position\": \"B+\", \"material\": \"A-\", \"structure\": \"B+\", \"language\": \"A-\", \"perspective\": \"A-\"}",
+      "teacher_confidence_override": null,
+      "teacher_tags": "[\"能自发考虑反方观点\", \"情感投入丰富\", \"有简单逻辑连接\"]",
       "teacher_note": "",
       "teacher_reviewed": true,
       "teacher_rating": "",
@@ -174,22 +153,14 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "清晰性": "A-",
-        "解释力": "A-",
-        "证据意识": "B+"
-      },
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [],
+      "teacher_dimension_scores": "{\"position\": \"A-\", \"material\": \"B+\", \"structure\": \"B+\", \"language\": \"B+\", \"perspective\": \"B+\"}",
       "teacher_confidence_override": null,
-      "teacher_tags": [
-        "有解释意图",
-        "证据意识萌芽",
-        "口语化表达",
-        "表达需增强"
-      ],
+      "teacher_tags": "[\"有解释意图\", \"选材意识萌芽\", \"口语化表达\", \"语言待精确\"]",
       "teacher_note": "",
       "teacher_reviewed": true,
       "teacher_rating": "",
@@ -208,20 +179,14 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "清晰性": "A",
-        "解释力": "A",
-        "证据意识": "B"
-      },
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [],
+      "teacher_dimension_scores": "{\"position\": \"A\", \"material\": \"B\", \"structure\": \"A-\", \"language\": \"A\", \"perspective\": \"B+\"}",
       "teacher_confidence_override": null,
-      "teacher_tags": [
-        "表达清晰",
-        "证据意识待发展"
-      ],
+      "teacher_tags": "[\"观点表达清晰\", \"选材意识待发展\"]",
       "teacher_note": "",
       "teacher_reviewed": true,
       "teacher_rating": "",
@@ -240,22 +205,16 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "清晰性": "A",
-        "相关性": "A",
-        "因果推理": "A-",
-        "证据使用": "A"
-      },
-      "teacher_confidence_override": null,
-      "teacher_tags": [
-        "因果推理",
-        "证据使用",
-        "优秀论证"
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [
+        "有自己"
       ],
+      "teacher_dimension_scores": "{\"position\": \"A\", \"material\": \"A\", \"structure\": \"A-\", \"language\": \"A-\", \"perspective\": \"B+\"}",
+      "teacher_confidence_override": null,
+      "teacher_tags": "[\"结构清晰\", \"选材具体\", \"论证有深度\"]",
       "teacher_note": "",
       "teacher_reviewed": true,
       "teacher_rating": "",
@@ -274,24 +233,15 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "清晰性": "A-",
-        "相关性": "A",
-        "因果推理": "A-",
-        "证据使用": "A-"
-      },
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [],
+      "teacher_dimension_scores": "{\"position\": \"A-\", \"material\": \"A-\", \"structure\": \"A-\", \"language\": \"A\", \"perspective\": \"B+\"}",
       "teacher_confidence_override": null,
-      "teacher_tags": [
-        "自我质疑",
-        "事实与观点",
-        "证据使用",
-        "因果推理"
-      ],
-      "teacher_note": "证据使用尚可",
+      "teacher_tags": "[\"自我质疑\", \"事实与观点\", \"选材具体\", \"结构清晰\"]",
+      "teacher_note": "选材尚可",
       "teacher_reviewed": true,
       "teacher_rating": "",
       "processing_status": "not_started"
@@ -309,23 +259,17 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "清晰性": "A",
-        "相关性": "A+",
-        "因果推理": "A",
-        "证据使用": "A"
-      },
-      "teacher_confidence_override": null,
-      "teacher_tags": [
-        "逻辑推理清晰",
-        "视角多元分析",
-        "相关性极佳"
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [
+        "有新意"
       ],
-      "teacher_note": "相关性极佳",
+      "teacher_dimension_scores": "{\"position\": \"A\", \"material\": \"A\", \"structure\": \"A\", \"language\": \"A-\", \"perspective\": \"A+\"}",
+      "teacher_confidence_override": null,
+      "teacher_tags": "[\"结构清晰\", \"视角多元分析\", \"紧扣主题\"]",
+      "teacher_note": "紧扣主题",
       "teacher_reviewed": true,
       "teacher_rating": "",
       "processing_status": "not_started"
@@ -343,23 +287,14 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "clarity": "A",
-        "relevance": "A",
-        "argument_evaluation": "B+",
-        "depth_breadth": "A",
-        "self_regulation": "A"
-      },
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [],
+      "teacher_dimension_scores": "{\"position\": \"A\", \"material\": \"A\", \"structure\": \"B+\", \"language\": \"A-\", \"perspective\": \"A\"}",
       "teacher_confidence_override": null,
-      "teacher_tags": [
-        "多角度分析",
-        "因果推理",
-        "论证质量待加强"
-      ],
+      "teacher_tags": "[\"多角度分析\", \"结构清晰\", \"结构待加强\"]",
       "teacher_note": "",
       "teacher_reviewed": true,
       "teacher_rating": "",
@@ -378,25 +313,15 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "clarity": "A",
-        "relevance": "A",
-        "argument_evaluation": "A-",
-        "depth_breadth": "A",
-        "self_regulation": "A-"
-      },
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [],
+      "teacher_dimension_scores": "{\"position\": \"A\", \"material\": \"A\", \"structure\": \"A-\", \"language\": \"A-\", \"perspective\": \"A\"}",
       "teacher_confidence_override": null,
-      "teacher_tags": [
-        "因果推理",
-        "概念分析",
-        "反驳意识待加强",
-        "动物园"
-      ],
-      "teacher_note": "很好的因果推理能力",
+      "teacher_tags": "[\"结构清晰\", \"概念分析\", \"反驳意识待加强\", \"动物园\"]",
+      "teacher_note": "很好的逻辑结构能力",
       "teacher_reviewed": true,
       "teacher_rating": "",
       "processing_status": "not_started"
@@ -414,25 +339,14 @@
       "segment_end_ms": null,
       "ai_dimension_scores": null,
       "ai_confidence": "uncertain",
-      "ai_reasoning": {},
-      "ai_extracted_features": {},
+      "ai_reasoning": "{}",
+      "ai_extracted_features": "{}",
       "ai_note": "",
-      "ai_suggested_tags": [],
-      "teacher_dimension_scores": {
-        "clarity": "B+",
-        "relevance": "B+",
-        "argument_evaluation": "B",
-        "depth_breadth": "B",
-        "self_regulation": "B"
-      },
+      "ai_suggested_tags": "[]",
+      "ai_bonus_flags": [],
+      "teacher_dimension_scores": "{\"position\": \"B+\", \"material\": \"B\", \"structure\": \"B\", \"language\": \"B+\", \"perspective\": \"B\"}",
       "teacher_confidence_override": null,
-      "teacher_tags": [
-        "单一视角",
-        "需加强因果推理",
-        "个人经验主导",
-        "缺乏反驳",
-        "论证意识初现"
-      ],
+      "teacher_tags": "[\"单一视角\", \"需加强逻辑连接\", \"个人经验主导\", \"缺乏反驳\", \"论证意识初现\"]",
       "teacher_note": "",
       "teacher_reviewed": true,
       "teacher_rating": "",
@@ -446,7 +360,7 @@
       "name": "观点表达清晰",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 2,
@@ -454,7 +368,7 @@
       "name": "能使用因果连接词",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 3,
@@ -462,7 +376,7 @@
       "name": "论据具体有力",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 4,
@@ -470,7 +384,7 @@
       "name": "考虑了多方立场",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 5,
@@ -478,7 +392,7 @@
       "name": "展示了自我反思",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 6,
@@ -486,7 +400,7 @@
       "name": "能区分事实与观点",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 7,
@@ -494,7 +408,7 @@
       "name": "论述缺乏论据支撑",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 8,
@@ -502,7 +416,7 @@
       "name": "能引用具体证据",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 9,
@@ -510,7 +424,7 @@
       "name": "跑题或答非所问",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 10,
@@ -518,7 +432,7 @@
       "name": "仅有断言无推理",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 11,
@@ -526,7 +440,7 @@
       "name": "未考虑反面论据",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 12,
@@ -534,7 +448,7 @@
       "name": "论点过于笼统",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 13,
@@ -542,7 +456,7 @@
       "name": "能用完整句表达感受",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 14,
@@ -550,7 +464,7 @@
       "name": "能区分材料与想象",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 15,
@@ -558,7 +472,7 @@
       "name": "口语化严重但观点独特",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 16,
@@ -566,7 +480,7 @@
       "name": "因果链条不完整",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 17,
@@ -574,7 +488,7 @@
       "name": "部分跑题但能自行拉回",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 18,
@@ -582,7 +496,7 @@
       "name": "开始尝试多角度思考",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 19,
@@ -590,7 +504,7 @@
       "name": "识别了隐藏假设",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 20,
@@ -598,7 +512,7 @@
       "name": "论证有深度",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 21,
@@ -606,7 +520,7 @@
       "name": "篇幅长但内容空洞",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 22,
@@ -614,7 +528,7 @@
       "name": "反驳角度独特",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 23,
@@ -622,7 +536,7 @@
       "name": "概念界定意识强",
       "source": "base",
       "use_count": 0,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 24,
@@ -630,153 +544,73 @@
       "name": "动物园",
       "source": "teacher",
       "use_count": 1,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 25,
       "course_id": 1,
-      "name": "论证质量待加强",
+      "name": "结构待加强",
       "source": "teacher",
       "use_count": 1,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 26,
       "course_id": 1,
-      "name": "相关性极佳",
+      "name": "紧扣主题",
       "source": "teacher",
       "use_count": 1,
-      "topic_ids": []
+      "topic_ids": "[]"
     },
     {
       "id": 27,
       "course_id": 1,
-      "name": "表达需增强",
+      "name": "语言待精确",
       "source": "teacher",
       "use_count": 1,
-      "topic_ids": []
+      "topic_ids": "[]"
     }
   ],
   "calibrations": [
     {
-      "id": 1,
-      "response_id": 4,
+      "id": 4,
+      "response_id": 9,
       "teacher_id": "default",
-      "ai_original_scores": {
-        "clarity": "B+",
-        "relevance": "B+",
-        "inference": "B",
-        "evidence_use": "B+"
-      },
-      "teacher_final_scores": {
-        "clarity": "B+",
-        "relevance": "A",
-        "inference": "B",
-        "evidence_use": "B+"
-      },
-      "modifications": [
-        {
-          "dimension": "relevance",
-          "from_rating": "B+",
-          "to_rating": "A",
-          "reason": "虽然论据不多，但反驳角度很独特，应该给更高的相关性评分"
-        }
-      ],
-      "note": "这个学生虽然论述不长，但切入角度很好，不应因篇幅短而降分",
-      "created_at": "2026-08-07T05:56:32.742348"
-    },
-    {
-      "id": 2,
-      "response_id": 8,
-      "teacher_id": "default",
-      "ai_original_scores": {
-        "clarity": "A",
-        "argument_evaluation": "B+",
-        "depth_breadth": "B+",
-        "self_regulation": "B"
-      },
-      "teacher_final_scores": {
-        "clarity": "A",
-        "argument_evaluation": "A",
-        "depth_breadth": "B+",
-        "self_regulation": "B"
-      },
-      "modifications": [
-        {
-          "dimension": "argument_evaluation",
-          "from_rating": "B+",
-          "to_rating": "A",
-          "reason": "学生使用了具体的生活案例作为论据，这比引用数据更有说服力"
-        }
-      ],
-      "note": "生活案例和统计数据一样有价值，不要因为没用数字就低估论据质量",
-      "created_at": "2026-08-08T05:56:32.742384"
+      "ai_original_scores": "{\"position\": \"A\", \"material\": \"B\", \"structure\": \"B\", \"language\": \"A-\", \"perspective\": \"B\"}",
+      "teacher_final_scores": "{\"position\": \"A\", \"material\": \"B-\", \"structure\": \"B-\", \"language\": \"A-\", \"perspective\": \"B\"}",
+      "modifications": "[{\"dimension\": \"material\", \"from_rating\": \"B\", \"to_rating\": \"B-\", \"reason\": \"全文都是“我觉得”“大家都知道”式断言，没有实质性论据\"}, {\"dimension\": \"structure\", \"from_rating\": \"B\", \"to_rating\": \"B-\", \"reason\": \"从头到尾只有一个角度的重复陈述\"}]",
+      "note": "篇幅长不等于质量好，这篇论述表面流畅但缺乏实质内容",
+      "created_at": "2026-08-10T10:05:07.277683"
     },
     {
       "id": 3,
       "response_id": 5,
       "teacher_id": "default",
-      "ai_original_scores": {
-        "clarity": "B",
-        "relevance": "B+",
-        "inference": "B",
-        "evidence_use": "B"
-      },
-      "teacher_final_scores": {
-        "clarity": "B+",
-        "relevance": "B+",
-        "inference": "B+",
-        "evidence_use": "B"
-      },
-      "modifications": [
-        {
-          "dimension": "clarity",
-          "from_rating": "B",
-          "to_rating": "B+",
-          "reason": "虽然表达不太流畅，但能看出核心观点是什么"
-        },
-        {
-          "dimension": "inference",
-          "from_rating": "B",
-          "to_rating": "B+",
-          "reason": "学生用了“因为”这个词，说明有因果推理的意识"
-        }
-      ],
+      "ai_original_scores": "{\"position\": \"B\", \"material\": \"B+\", \"structure\": \"B\", \"language\": \"B\", \"perspective\": \"B+\"}",
+      "teacher_final_scores": "{\"position\": \"B+\", \"material\": \"B+\", \"structure\": \"B+\", \"language\": \"B\", \"perspective\": \"B+\"}",
+      "modifications": "[{\"dimension\": \"position\", \"from_rating\": \"B\", \"to_rating\": \"B+\", \"reason\": \"虽然表达不太流畅，但能看出核心观点是什么\"}, {\"dimension\": \"structure\", \"from_rating\": \"B\", \"to_rating\": \"B+\", \"reason\": \"学生用了“因为”这个词，说明有逻辑连接的意识\"}]",
       "note": "这个学生表达比较吃力，但思维火花值得肯定，不要因为表达问题过度扣分",
-      "created_at": "2026-08-09T05:56:32.742399"
+      "created_at": "2026-08-09T10:05:07.277664"
     },
     {
-      "id": 4,
-      "response_id": 9,
+      "id": 2,
+      "response_id": 8,
       "teacher_id": "default",
-      "ai_original_scores": {
-        "clarity": "A",
-        "argument_evaluation": "B",
-        "depth_breadth": "B",
-        "self_regulation": "B"
-      },
-      "teacher_final_scores": {
-        "clarity": "A",
-        "argument_evaluation": "B-",
-        "depth_breadth": "B-",
-        "self_regulation": "B"
-      },
-      "modifications": [
-        {
-          "dimension": "argument_evaluation",
-          "from_rating": "B",
-          "to_rating": "B-",
-          "reason": "全文都是“我觉得”“大家都知道”式断言，没有实质性论据"
-        },
-        {
-          "dimension": "depth_breadth",
-          "from_rating": "B",
-          "to_rating": "B-",
-          "reason": "从头到尾只有一个角度的重复陈述"
-        }
-      ],
-      "note": "篇幅长不等于质量好，这篇论述表面流畅但缺乏实质内容",
-      "created_at": "2026-08-10T05:56:32.742410"
+      "ai_original_scores": "{\"position\": \"A\", \"material\": \"B+\", \"structure\": \"B+\", \"language\": \"A-\", \"perspective\": \"B+\"}",
+      "teacher_final_scores": "{\"position\": \"A\", \"material\": \"A\", \"structure\": \"B+\", \"language\": \"A-\", \"perspective\": \"B+\"}",
+      "modifications": "[{\"dimension\": \"material\", \"from_rating\": \"B+\", \"to_rating\": \"A\", \"reason\": \"学生使用了具体的生活案例作为论据，这比引用数据更有说服力\"}]",
+      "note": "生活案例和统计数据一样有价值，不要因为没用数字就低估论据质量",
+      "created_at": "2026-08-08T10:05:07.277635"
+    },
+    {
+      "id": 1,
+      "response_id": 4,
+      "teacher_id": "default",
+      "ai_original_scores": "{\"position\": \"B+\", \"material\": \"B+\", \"structure\": \"B\", \"language\": \"B+\", \"perspective\": \"B+\"}",
+      "teacher_final_scores": "{\"position\": \"B+\", \"material\": \"B+\", \"structure\": \"A\", \"language\": \"B+\", \"perspective\": \"B+\"}",
+      "modifications": "[{\"dimension\": \"structure\", \"from_rating\": \"B+\", \"to_rating\": \"A\", \"reason\": \"虽然论据不多，但反驳角度很独特，逻辑链条值得更高的结构评分\"}]",
+      "note": "这个学生虽然论述不长，但切入角度很好，不应因篇幅短而降分",
+      "created_at": "2026-08-07T10:05:07.277545"
     }
   ]
 }

@@ -14,6 +14,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from database import CalibrationRecord, DimensionTag
+from grading.ratings import normalize_dimension_scores
 
 
 def sync_tags_to_library(
@@ -58,11 +59,15 @@ def apply_teacher_review(
     """
     created = False
 
+    # 统一维度 key：无论 AI 返回中文维度名还是旧 key，落库前归一化为五维度标准 key。
+    dimension_scores = normalize_dimension_scores(dimension_scores or {}) or None
+    ai_scores = normalize_dimension_scores(resp.ai_dimension_scores or {}) or None
+
     # Calibration record only when the teacher actually modified AI scores.
-    if dimension_scores and resp.ai_dimension_scores:
+    if dimension_scores and ai_scores:
         modifications = []
         for dim, new_rating in dimension_scores.items():
-            old_rating = resp.ai_dimension_scores.get(dim)
+            old_rating = ai_scores.get(dim)
             if old_rating and old_rating != new_rating:
                 modifications.append(
                     {
@@ -77,7 +82,7 @@ def apply_teacher_review(
                 CalibrationRecord(
                     response_id=resp.id,
                     teacher_id="default",
-                    ai_original_scores=resp.ai_dimension_scores,
+                    ai_original_scores=ai_scores,
                     teacher_final_scores=dimension_scores,
                     modifications=modifications,
                     note=note,

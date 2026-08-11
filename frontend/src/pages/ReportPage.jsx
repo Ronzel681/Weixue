@@ -1,13 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import useStore from '../stores/gradingStore';
 import { computeClassReport } from '../utils/analytics';
-import { ratingToNumber } from '../utils/ratings';
+import { ratingToNumber, applyBonusUpgrade, bandFromAverage, upgradeBand, normalizeScores } from '../utils/ratings';
 import * as api from '../api/client';
 
 const DIM_LABELS = {
-  clarity: '清晰性', interpretation: '解释力', evidence_awareness: '证据意识',
-  relevance: '相关性', inference: '因果推理', evidence_use: '证据使用',
-  argument_evaluation: '论证质量', depth_breadth: '深度广度', self_regulation: '反思调节',
+  position: '立意（观点鲜明）', material: '选材（言之有物）',
+  structure: '结构（条理清晰）', language: '语言（用词准确）',
+  perspective: '视角（换位思考）',
+  // 旧数据兼容：老维度 key 也统一显示为五维度
+  clarity: '立意（观点鲜明）', interpretation: '立意（观点鲜明）',
+  evidence_awareness: '选材（言之有物）', evidence_use: '选材（言之有物）',
+  relevance: '结构（条理清晰）', inference: '结构（条理清晰）',
+  argument_evaluation: '结构（条理清晰）', depth_breadth: '视角（换位思考）',
+  self_regulation: '视角（换位思考）',
+  清晰性: '立意（观点鲜明）', 解释力: '立意（观点鲜明）',
+  证据意识: '选材（言之有物）', 证据使用: '选材（言之有物）',
+  相关性: '结构（条理清晰）', 因果推理: '结构（条理清晰）',
+  论证质量: '结构（条理清晰）', 深度广度: '视角（换位思考）',
+  反思调节: '视角（换位思考）',
 };
 
 const barColor = (val) => {
@@ -105,6 +116,8 @@ function ParentReportView({ report, loading, onBack }) {
   }
 
   const dims = Object.entries(report.dimensions || {});
+  const bonus = report.bonus_flags || [];
+  const finalRating = applyBonusUpgrade(report.rating, bonus);
   return (
     <div className="flex flex-col gap-5">
       <div className="bg-white rounded-xl p-5 border border-slate-200 flex items-center justify-between">
@@ -158,9 +171,14 @@ function ParentReportView({ report, loading, onBack }) {
           </div>
           <div className="bg-white rounded-xl p-5 border border-slate-200">
             <h3 className="text-sm font-semibold text-slate-800 mb-2">综合评价</h3>
-            <div className="text-lg font-bold" style={{ color: ratingColor(report.rating ? ratingToNumber(report.rating) : 0) }}>
-              {report.rating || '待评定'}
+            <div className="text-lg font-bold" style={{ color: ratingColor(finalRating ? ratingToNumber(finalRating) : 0) }}>
+              {finalRating || '待评定'}
             </div>
+            {bonus.length > 0 && (
+              <div className="mt-1.5 text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                加分项：{bonus.join('、')} → 综合评级已升级
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -201,7 +219,7 @@ export default function ReportPage() {
       .flat()
       .filter((r) => r.student_id !== undefined && studentIds.has(r.student_id))
       .forEach((r) => {
-        const scores = r.teacher_dimension_scores || r.ai_dimension_scores;
+        const scores = normalizeScores(r.teacher_dimension_scores || r.ai_dimension_scores);
         const confidence = r.teacher_confidence_override || r.ai_confidence;
         if (confidence === 'uncertain' && !r.teacher_dimension_scores) return;
         if (!scores || typeof scores !== 'object') return;
@@ -312,17 +330,20 @@ export default function ReportPage() {
         <div className="grid grid-cols-3 gap-2">
           {report.student_stats.map(s => {
             const sl = scoreLabel(s.avg_score);
+            const band = upgradeBand(bandFromAverage(s.avg_score), s.bonus_flags || []);
+            const upgraded = band !== sl.text && s.avg_score > 0;
             return (
               <div key={s.student_id} className="p-3 rounded-lg bg-slate-50 border border-slate-100">
                 <div className="flex justify-between items-center mb-1.5">
                   <div>
                     <span className="text-sm font-medium text-slate-700">{s.name}</span>
                     <span className="text-[10px] text-slate-400 ml-1.5">{s.grade}年级</span>
+                    {upgraded && <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700">加分项↑</span>}
                   </div>
                   <span className={`text-sm font-bold ${sl.cls}`}>{s.avg_score > 0 ? s.avg_score.toFixed(1) : '-'}</span>
                 </div>
                 <div className="text-[11px] text-slate-400 mt-1">
-                  {s.cognitive_tier === 'basic' ? '基础层' : s.cognitive_tier === 'developing' ? '发展层' : '进阶层'}
+                  {band} · {s.cognitive_tier === 'basic' ? '基础层' : s.cognitive_tier === 'developing' ? '发展层' : '进阶层'}
                   {s.uncertain > 0 ? ` · ${s.uncertain}题存疑` : ''}
                 </div>
                 <button

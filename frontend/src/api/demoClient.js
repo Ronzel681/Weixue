@@ -8,6 +8,7 @@
  */
 import demoData from '../demo-data.json';
 import { computePrepAnalytics, computeClassReport } from '../utils/analytics';
+import { normalizeScores } from '../utils/ratings';
 
 const _clone = (v) => JSON.parse(JSON.stringify(v));
 const _pristine = demoData;
@@ -16,7 +17,8 @@ const ok = (d) => Promise.resolve(d);
 
 // Persist the demo dataset to localStorage so multiple windows (student windows,
 // teacher reloads, a second workbench tab) share the SAME data. Reset clears it.
-const STORAGE_KEY = 'weixue-demo-data-v1';
+// v2：五维度重构后缓存结构变化，升版本让旧 localStorage 自动作废，避免新旧数据挤压。
+const STORAGE_KEY = 'weixue-demo-data-v2';
 
 function _persist() {
   try {
@@ -46,7 +48,7 @@ const _lastSuggestion = {}; // { [responseId]: {questions, scaffold_status, echo
 _hydrate();
 
 const MOCK_SCORES = {
-  clarity: 'A', relevance: 'A-', inference: 'B+', evidence_use: 'B+',
+  position: 'A', material: 'A-', structure: 'B+', language: 'A-', perspective: 'B+',
 };
 
 const DEMO_SUGGESTIONS = [
@@ -78,8 +80,8 @@ function _parseResponse(r) {
     ...r,
     processing_status: r.processing_status || _status[r.id] || 'not_started',
     teacher_rating: r.teacher_rating || '',
-    ai_dimension_scores: _jp(r.ai_dimension_scores),
-    teacher_dimension_scores: _jp(r.teacher_dimension_scores),
+    ai_dimension_scores: normalizeScores(_jp(r.ai_dimension_scores)),
+    teacher_dimension_scores: normalizeScores(_jp(r.teacher_dimension_scores)),
     ai_reasoning: _jp(r.ai_reasoning),
     ai_extracted_features: _jp(r.ai_extracted_features),
     ai_suggested_tags: _jp(r.ai_suggested_tags),
@@ -297,6 +299,27 @@ export const updateResponseStatus = (rid, status) => {
 };
 
 export const getDialogue = (rid) => ok((_dialogue[rid] || []).map(t => ({ ...t })));
+
+export const flashFeedback = (rid) => {
+  const dialogue = _dialogue[rid] || [];
+  const studentTurns = dialogue.filter(t => t.role === 'student');
+  const last = studentTurns[studentTurns.length - 1];
+  const text = (last?.content || '').trim();
+  // 演示版轻量规则：有因果连接词则点出“用理由支撑”，否则通用肯定
+  const feedback = /因为|所以|如果/.test(text)
+    ? '你把自己的想法说出来，还用理由撑住了它，真棒！'
+    : '你把自己的想法说出来啦，真棒！';
+  return ok({ feedback });
+};
+
+export const finishDialogue = (rid, by) => {
+  const resp = _data.responses.find(r => r.id === rid);
+  if (resp) {
+    resp.dialogue_finished = by;
+    _persist();
+  }
+  return ok(_parseResponse(resp));
+};
 
 export const appendTurn = (rid, data) => {
   const resp = _data.responses.find(r => r.id === rid);

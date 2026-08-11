@@ -84,10 +84,17 @@ def _ms(dt) -> int:
     return int(dt.timestamp() * 1000)
 
 
+_DIM_LABELS = {
+    "position": "立意", "material": "选材", "structure": "结构",
+    "language": "语言", "perspective": "视角",
+}
+
+
 def _format_scores(scores) -> str:
+    """Format dimension scores for Bitable, using enterprise five-dimension labels."""
     if not scores:
         return ""
-    return "；".join(f"{k}:{v}" for k, v in scores.items())
+    return "；".join(f"{_DIM_LABELS.get(k, k)}:{v}" for k, v in scores.items())
 
 
 def build_course_record(course) -> dict:
@@ -148,6 +155,7 @@ def build_response_record(response, student, topic) -> dict:
             "AI评分摘要": _format_scores(response.ai_dimension_scores),
             "AI置信度": _single(confidence),
             "AI建议标签": _multi(response.ai_suggested_tags),
+            "加分项": _multi(response.ai_bonus_flags),
             "教师评分": _format_scores(response.teacher_dimension_scores or {}),
             "教师标签": _multi(response.teacher_tags),
             "教师批注": response.teacher_note or "",

@@ -8,6 +8,7 @@ Two-stage pipeline:
 from typing import Optional
 from .llm import LLMClient
 from .rubric_loader import RubricLoader
+from .ratings import normalize_dimension_scores
 from companion import build_dialogue_block
 
 CLEANING_SYSTEM_PROMPT = (
@@ -93,7 +94,7 @@ class AssessmentEngine:
             result = await self.llm.chat_json(
                 messages=messages,
                 temperature=0.2,
-                max_tokens=4000,
+                max_tokens=8000,
             )
             return self._normalize(result)
         except Exception as e:
@@ -102,6 +103,7 @@ class AssessmentEngine:
                 'confidence': 'uncertain',
                 'reasoning': {},
                 'extracted_features': {},
+                'bonus_flags': [],
                 'note': f'AI评估失败（{e}），请教师手动审阅。',
                 'suggested_tags': [],
             }
@@ -181,6 +183,8 @@ class AssessmentEngine:
             "（去掉口语填充词、修正明显错别字、规范标点，不改变观点和论证结构），"
             "然后在返回的 JSON 中额外包含 \"cleaned_text\" 字段（清洗后的文本），"
             "其余字段严格按上述格式返回。"
+            "整个回答只输出一个 JSON 对象，不要 Markdown 代码块；"
+            "字符串内的换行请用 \\n 转义，不要输出字面换行。"
         )
         messages = [
             {'role': 'system', 'content': system_prompt},
@@ -190,7 +194,7 @@ class AssessmentEngine:
             result = await self.llm.chat_json(
                 messages=messages,
                 temperature=0.2,
-                max_tokens=4000,
+                max_tokens=8000,
             )
             normalized = self._normalize(result)
             cleaned = result.get("cleaned_text") or ""
@@ -205,6 +209,7 @@ class AssessmentEngine:
                 'confidence': 'uncertain',
                 'reasoning': {},
                 'extracted_features': {},
+                'bonus_flags': [],
                 'note': f'AI评估失败（{e}），请教师手动审阅。',
                 'suggested_tags': [],
             }
@@ -212,9 +217,10 @@ class AssessmentEngine:
     @staticmethod
     def _normalize(raw: dict) -> dict:
         """Normalize LLM response into AssessmentResult shape."""
-        dimension_scores = raw.get('dimension_scores', {})
+        dimension_scores = normalize_dimension_scores(raw.get('dimension_scores', {}))
         reasoning = raw.get('reasoning', {})
         extracted_features = raw.get('extracted_features', {})
+        bonus_flags = raw.get('bonus_flags', [])
         confidence = raw.get('confidence', 'uncertain')
         note = raw.get('note', '')
         suggested_tags = raw.get('suggested_tags', [])
@@ -222,6 +228,11 @@ class AssessmentEngine:
         # Validate dimension_scores is a dict of str→str
         if not isinstance(dimension_scores, dict):
             dimension_scores = {}
+
+        # Bonus flags: only the two enterprise-approved values survive.
+        if not isinstance(bonus_flags, list):
+            bonus_flags = []
+        bonus_flags = [b for b in bonus_flags if b in {"有自己", "有新意"}]
 
         # Validate confidence value
         valid_confidence = {'certain_good', 'certain_weak', 'uncertain'}
@@ -244,6 +255,7 @@ class AssessmentEngine:
             'confidence': confidence,
             'reasoning': reasoning if isinstance(reasoning, dict) else {},
             'extracted_features': extracted_features if isinstance(extracted_features, dict) else {},
+            'bonus_flags': bonus_flags,
             'note': note,
             'suggested_tags': suggested_tags if isinstance(suggested_tags, list) else [],
         }

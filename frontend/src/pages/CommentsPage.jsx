@@ -1,19 +1,31 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import useStore from '../stores/gradingStore';
 import * as api from '../api/client';
-import { averageRating } from '../utils/ratings';
-const ratingLabel = (avg) => {
-  if (avg >= 3.5) return { text: '优秀', cls: 'text-green-600' };
-  if (avg >= 2.5) return { text: '良好', cls: 'text-emerald-600' };
-  if (avg >= 1.5) return { text: '待提升', cls: 'text-yellow-600' };
-  if (avg > 0) return { text: '薄弱', cls: 'text-red-600' };
-  return { text: '未评', cls: 'text-slate-400' };
+import { averageRating, bandFromAverage, upgradeBand, collectBonusFlags } from '../utils/ratings';
+const BAND_CLS = {
+  优秀: 'text-green-600', 良好: 'text-emerald-600',
+  待提升: 'text-yellow-600', 薄弱: 'text-red-600', 未评: 'text-slate-400',
+};
+const ratingLabel = (avg, bonusFlags) => {
+  const band = upgradeBand(bandFromAverage(avg), bonusFlags);
+  return { text: band, cls: BAND_CLS[band] || BAND_CLS.未评, upgraded: Array.isArray(bonusFlags) && bonusFlags.length > 0 && band !== '未评' };
 };
 
 const DIM_LABELS = {
-  clarity: '清晰性', interpretation: '解释力', evidence_awareness: '证据意识',
-  relevance: '相关性', inference: '因果推理', evidence_use: '证据使用',
-  argument_evaluation: '论证质量', depth_breadth: '深度广度', self_regulation: '反思调节',
+  position: '立意（观点鲜明）', material: '选材（言之有物）',
+  structure: '结构（条理清晰）', language: '语言（用词准确）',
+  perspective: '视角（换位思考）',
+  // 旧数据兼容：老维度 key 也统一显示为五维度
+  clarity: '立意（观点鲜明）', interpretation: '立意（观点鲜明）',
+  evidence_awareness: '选材（言之有物）', evidence_use: '选材（言之有物）',
+  relevance: '结构（条理清晰）', inference: '结构（条理清晰）',
+  argument_evaluation: '结构（条理清晰）', depth_breadth: '视角（换位思考）',
+  self_regulation: '视角（换位思考）',
+  清晰性: '立意（观点鲜明）', 解释力: '立意（观点鲜明）',
+  证据意识: '选材（言之有物）', 证据使用: '选材（言之有物）',
+  相关性: '结构（条理清晰）', 因果推理: '结构（条理清晰）',
+  论证质量: '结构（条理清晰）', 深度广度: '视角（换位思考）',
+  反思调节: '视角（换位思考）',
 };
 
 export default function CommentsPage() {
@@ -87,7 +99,7 @@ export default function CommentsPage() {
     }
   });
   const studentAvg = topicCount > 0 ? totalAvg / topicCount : 0;
-  const rl = ratingLabel(studentAvg);
+  const rl = ratingLabel(studentAvg, collectBonusFlags(resps));
 
   const generate = async () => {
     if (!student) return;
@@ -133,7 +145,7 @@ export default function CommentsPage() {
       if (scores) { avg += averageRating(scores); cnt++; }
     });
     const stAvg = cnt > 0 ? avg / cnt : 0;
-    return { name: st.name, idx: i, avg: stAvg, reviewed, hasDraft: !!st.comment_draft };
+    return { name: st.name, idx: i, avg: stAvg, reviewed, hasDraft: !!st.comment_draft, bonus: collectBonusFlags(ss) };
   });
 
   const handleStudentChange = (i) => {
@@ -164,7 +176,7 @@ export default function CommentsPage() {
         <span className="text-xs text-slate-500 shrink-0">选择学生：</span>
         <div className="flex gap-1.5 flex-wrap flex-1">
           {studentInfo.map((si, i) => {
-            const siLabel = ratingLabel(si.avg);
+            const siLabel = ratingLabel(si.avg, si.bonus);
             return (
               <button key={i} onClick={() => handleStudentChange(i)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer
@@ -224,6 +236,7 @@ export default function CommentsPage() {
               <div className="text-sm font-semibold text-slate-600 mb-3">评估结果摘要</div>
               <div className={`text-xl font-bold mb-2 ${rl.cls}`}>
                 {rl.text} <span className="text-sm text-slate-400">（均分 {studentAvg.toFixed(1)}/4.0）</span>
+                {rl.upgraded && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">加分项↑</span>}
               </div>
               <div className="text-xs text-slate-500 mb-2">
                 教师已批改 <b className="text-indigo-600">{reviewedCount}</b> / {topicCount} 个辩题

@@ -18,4 +18,5 @@ record.m4a
 团队分工与时间线.pdf
 .env.bak*
 backend/bootstrap_run2.json
+backend/data/grading.db.bak*
 .DS_Store

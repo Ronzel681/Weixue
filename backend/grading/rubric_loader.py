@@ -83,6 +83,13 @@ class RubricLoader:
             "- 评语基调：肯定式、发现闪光点，避免应试式纠错口吻。\n"
         )
 
+        # 输出格式硬性要求（防止模型截断/字面换行导致 JSON 解析失败）
+        prompt += (
+            "\n\n【输出格式硬性要求】\n"
+            "- 整个回答只输出一个 JSON 对象，不要 Markdown 代码块，不要前后说明文字。\n"
+            "- 字符串内的换行用 \\n 转义，不要输出字面换行。\n"
+        )
+
         return prompt
 
     def build_user_prompt(
@@ -127,6 +134,12 @@ class RubricLoader:
                 parts.append(block)
 
         parts.append(f"\n学生作答：\n{student_text}")
+        if dialogue_turns:
+            parts.append(
+                "\n说明：学生的作答是“初始口述 + 追问后的多轮补充”（见上方对话记录）。"
+                "请把它当作一个完整的思辨过程来评估：初始表达与每一轮补充都计入维度评分，"
+                "并关注学生在追问后是否有提升，而不是只按最后一段判断。"
+            )
         parts.append("\n请按上述系统指令中的评估维度逐一分析该学生的作答。")
 
         return "\n\n".join(parts)
@@ -222,11 +235,9 @@ class RubricLoader:
             return ""
 
         dim_labels = {
-            "clarity": "清晰性", "interpretation": "解释力",
-            "evidence_awareness": "证据意识", "relevance": "相关性",
-            "inference": "因果推理", "evidence_use": "证据使用",
-            "argument_evaluation": "论证质量", "depth_breadth": "深度广度",
-            "self_regulation": "反思调节",
+            "position": "立意（观点鲜明）", "material": "选材（言之有物）",
+            "structure": "结构（条理清晰）", "language": "语言（用词准确）",
+            "perspective": "视角（换位思考）",
         }
 
         def format_scores(scores: dict) -> str:
@@ -279,7 +290,9 @@ class RubricLoader:
         return (
             f"你是一位经验丰富的思辨课教师，正在评估学生的思辨能力表现。\n"
             f"当前学生的认知梯段为：{cognitive_tier}\n"
-            f"请从清晰性、逻辑性、观点深度等维度对该学生的作答进行分析。\n"
+            f"请按企业统一标准从五个维度评估：立意（观点鲜明）、选材（言之有物）、"
+            f"结构（条理清晰）、语言（用词准确）、视角（换位思考）。\n"
             f"对每个维度给出 A+/A/A-/B+/B/B- 评级，并说明评级理由。\n"
+            f"如命中加分项（有自己/有新意），在 bonus_flags 中列出。\n"
             f"请按 JSON 格式返回结果。"
         )

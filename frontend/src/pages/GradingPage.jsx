@@ -1,7 +1,7 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
 import useStore from '../stores/gradingStore';
 import * as api from '../api/client';
-import { averageRating, RATING_OPTIONS } from '../utils/ratings';
+import { averageRating, RATING_OPTIONS, bandFromAverage, upgradeBand, collectBonusFlags } from '../utils/ratings';
 
 /* ── Rating color helper ─────────────────────────────────── */
 const ratingColor = (rating) => {
@@ -17,17 +17,37 @@ const ratingColor = (rating) => {
 };
 
 const DIM_LABELS = {
-  clarity: '清晰性', interpretation: '解释力', evidence_awareness: '证据意识',
-  relevance: '相关性', inference: '因果推理', evidence_use: '证据使用',
-  argument_evaluation: '论证质量', depth_breadth: '深度广度', self_regulation: '反思调节',
+  position: '立意（观点鲜明）', material: '选材（言之有物）',
+  structure: '结构（条理清晰）', language: '语言（用词准确）',
+  perspective: '视角（换位思考）',
+  // 旧数据兼容：老维度 key 也统一显示为五维度
+  clarity: '立意（观点鲜明）', interpretation: '立意（观点鲜明）',
+  evidence_awareness: '选材（言之有物）', evidence_use: '选材（言之有物）',
+  relevance: '结构（条理清晰）', inference: '结构（条理清晰）',
+  argument_evaluation: '结构（条理清晰）', depth_breadth: '视角（换位思考）',
+  self_regulation: '视角（换位思考）',
+  清晰性: '立意（观点鲜明）', 解释力: '立意（观点鲜明）',
+  证据意识: '选材（言之有物）', 证据使用: '选材（言之有物）',
+  相关性: '结构（条理清晰）', 因果推理: '结构（条理清晰）',
+  论证质量: '结构（条理清晰）', 深度广度: '视角（换位思考）',
+  反思调节: '视角（换位思考）',
 };
 
-const overallBadge = (avg) => {
-  if (avg >= 3.5) return { label: '优秀', cls: 'bg-green-100 text-green-700' };
-  if (avg >= 2.5) return { label: '良好', cls: 'bg-emerald-50 text-emerald-700' };
-  if (avg >= 1.5) return { label: '待提升', cls: 'bg-yellow-50 text-yellow-700' };
-  if (avg > 0)    return { label: '薄弱', cls: 'bg-red-100 text-red-700' };
-  return { label: '未评', cls: 'bg-slate-100 text-slate-500' };
+const BAND_CLS = {
+  优秀: 'bg-green-100 text-green-700',
+  良好: 'bg-emerald-50 text-emerald-700',
+  待提升: 'bg-yellow-50 text-yellow-700',
+  薄弱: 'bg-red-100 text-red-700',
+  未评: 'bg-slate-100 text-slate-500',
+};
+
+const overallBadge = (avg, bonusFlags) => {
+  const band = upgradeBand(bandFromAverage(avg), bonusFlags);
+  return {
+    label: band,
+    cls: BAND_CLS[band] || BAND_CLS.未评,
+    upgraded: Array.isArray(bonusFlags) && bonusFlags.length > 0 && band !== '未评',
+  };
 };
 
 /* ── Feishu Bitable sync status (collapsible) ────────────────────────── */
@@ -160,7 +180,7 @@ export default function GradingPage() {
     if (scores) { totalAvg += averageRating(scores); topicCount++; }
   });
   const studentAvg = topicCount > 0 ? totalAvg / topicCount : 0;
-  const badge = overallBadge(studentAvg);
+  const badge = overallBadge(studentAvg, collectBonusFlags(resps));
 
   // Only show topics the student actually answered
   const studentTopics = topics.filter(t => {
@@ -185,7 +205,7 @@ export default function GradingPage() {
             if (sc) { avg += averageRating(sc); cnt++; }
           });
           const stAvg = cnt > 0 ? avg / cnt : 0;
-          const stBadge = overallBadge(stAvg);
+          const stBadge = overallBadge(stAvg, collectBonusFlags(ss));
           const active = i === currentStudentIdx;
           return (
             <div
@@ -200,6 +220,7 @@ export default function GradingPage() {
               </div>
               <div className="flex items-center gap-1.5">
                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${stBadge.cls}`}>{stBadge.label}</span>
+                {stBadge.upgraded && <span className="text-[9px] px-1 py-0.5 rounded bg-amber-100 text-amber-700" title="命中加分项，评级已升级">加分项↑</span>}
               </div>
             </div>
           );
@@ -224,6 +245,7 @@ export default function GradingPage() {
           </div>
           <div className="text-right">
             <span className={`text-sm font-semibold px-3 py-1 rounded-lg ${badge.cls}`}>{badge.label}</span>
+            {badge.upgraded && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">加分项↑</span>}
           </div>
         </div>
 
@@ -278,7 +300,9 @@ export default function GradingPage() {
           const resp = respMap[t.id];
           const scores = resp ? (resp.teacher_dimension_scores || resp.ai_dimension_scores) : null;
           const tAvg = averageRating(scores);
-          const tBadge = overallBadge(tAvg);
+          const tBadge = overallBadge(tAvg, resp?.ai_bonus_flags || []);
+          const baseBand = bandFromAverage(tAvg);
+          const bonus = resp?.ai_bonus_flags || [];
           const isExpanded = expandedTopic === t.id;
           const aiNote = resp?.ai_note || '';
           const teacherNote = resp?.teacher_note || '';
@@ -298,6 +322,7 @@ export default function GradingPage() {
                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${tBadge.cls}`}>
                   {tBadge.label}
                 </div>
+                {tBadge.upgraded && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">加分项↑</span>}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-slate-800">辩题{t.order}</span>
@@ -338,6 +363,30 @@ export default function GradingPage() {
               {/* Expanded detail */}
               {isExpanded && (
                 <div className="px-4 pb-4 border-t border-slate-100">
+                  {/* 总评分 + 额外加分 */}
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-white px-4 py-3 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] text-slate-400">总评分</div>
+                      <div className="text-lg font-bold mt-0.5">
+                        <span className={tBadge.cls}>{tBadge.label}</span>
+                        <span className="ml-2 text-xs font-normal text-slate-400">均分 {tAvg.toFixed(1)}/4.0</span>
+                      </div>
+                    </div>
+                    {bonus.length > 0 && (
+                      <div className="shrink-0 rounded-lg bg-gradient-to-r from-amber-100 to-yellow-50 border border-amber-300 px-3 py-2 flex items-center gap-2.5">
+                        <span className="text-lg leading-none">🌟</span>
+                        <div>
+                          <div className="text-xs font-bold text-amber-800">额外加分：{bonus.join('、')}</div>
+                          <div className="text-[10px] text-amber-700 mt-0.5">
+                            {tBadge.label !== baseBand
+                              ? `综合评级：${baseBand} → ${tBadge.label}`
+                              : '命中加分项，综合评级已达最高档'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Dimension score cards */}
                   {scores && (
                     <div className="mt-3 flex gap-2 flex-wrap">

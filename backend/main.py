@@ -45,6 +45,19 @@ from feishu.sync import BitableSyncer, bitable_status
 
 app = FastAPI(title="思辨星 · 少儿思辨能力认知自适应评估系统", version="0.1.0")
 
+# 企业加分项：命中“有自己 / 有新意”可提升一级评级（A → A+）
+_BONUS_VALUES = {"有自己", "有新意"}
+_RATING_ORDER = ["B-", "B", "B+", "A-", "A", "A+"]
+
+
+def _upgrade_rating(rating: str, bonus_flags: list) -> str:
+    """Upgrade an overall rating by one step when enterprise bonus flags hit."""
+    if not rating or rating not in _RATING_ORDER or rating == "A+":
+        return rating
+    if not bonus_flags or not any(b in _BONUS_VALUES for b in bonus_flags):
+        return rating
+    return _RATING_ORDER[_RATING_ORDER.index(rating) + 1]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -646,6 +659,7 @@ async def _run_assessment(cid: int, students, topics):
                     resp.ai_confidence = result.get("confidence", "uncertain")
                     resp.ai_reasoning = result.get("reasoning", {})
                     resp.ai_extracted_features = result.get("extracted_features", {})
+                    resp.ai_bonus_flags = result.get("bonus_flags", [])
                     resp.ai_note = result.get("note", "")
                     resp.ai_suggested_tags = result.get("suggested_tags", [])
 
@@ -824,6 +838,7 @@ def append_companion_turn(rid: int, body: CompanionTurnCreate, db: Session = Dep
 
     if body.role == "student":
         # A new oral round extends the raw answer and invalidates stale assessment.
+        student_rounds = sum(1 for t in (resp.companion_turns or []) if t.role == "student") + 1
         prev = (resp.raw_text or "").strip()
         resp.raw_text = (prev + "\n" + content).strip() if prev else content
         resp.cleaned_text = ""
@@ -840,7 +855,25 @@ def append_companion_turn(rid: int, body: CompanionTurnCreate, db: Session = Dep
         resp.teacher_reviewed = False
         resp.teacher_rating = ""
         resp.processing_status = "submitted"
+        # 答满 3 轮自动视为对话结束（与学生端 MAX_ROUNDS 一致）
+        if student_rounds >= 3:
+            resp.dialogue_finished = resp.dialogue_finished or "auto"
 
+    db.commit()
+    db.refresh(resp)
+    return resp
+
+
+@app.post("/api/responses/{rid}/dialogue-finish", response_model=StudentResponseOut)
+def finish_dialogue(rid: int, body: dict, db: Session = Depends(get_db)):
+    """Persist that the dialogue was ended by student or teacher (survives refresh)."""
+    resp = db.query(StudentResponse).get(rid)
+    if not resp:
+        raise HTTPException(404, "Response not found")
+    by = (body or {}).get("by", "student")
+    if by not in {"student", "teacher"}:
+        by = "student"
+    resp.dialogue_finished = by
     db.commit()
     db.refresh(resp)
     return resp
@@ -864,6 +897,53 @@ async def suggest_companion_turn(rid: int, db: Session = Depends(get_db)):
         student_grade=resp.student.grade if resp.student else 4,
     )
     return SuggestTurnOut(**result)
+
+
+_FLASH_FEEDBACK_FALLBACK = "你把自己的想法说出来啦，真棒！"
+
+
+@app.post("/api/companion/{rid}/feedback")
+async def flash_feedback(rid: int, db: Session = Depends(get_db)):
+    """Short, warm, score-free flash-point feedback for the student (LLM + fallback)."""
+    resp = db.query(StudentResponse).get(rid)
+    if not resp:
+        raise HTTPException(404, "Response not found")
+    text = (resp.raw_text or "").strip()
+    if not text:
+        return {"feedback": _FLASH_FEEDBACK_FALLBACK}
+
+    dialogue_lines = []
+    for t in (resp.companion_turns or []):
+        who = {"student": "学生", "teacher": "老师", "ai_suggestion": "AI"}.get(t.role, t.role)
+        dialogue_lines.append(f"{who}：{t.content}")
+    dialogue_block = "\n".join(dialogue_lines[-8:])
+
+    prompt = (
+        "你是一位温暖、懂孩子的思辨课老师。请根据下面的学生口述和对话，"
+        "用 1-2 句话直接对孩子说话（用“你”），肯定 TA 做得好的地方（发现闪光点）。\n"
+        "硬性要求：\n"
+        "- 只提对话中真实出现的表现，不要编造孩子没说过的话\n"
+        "- 语气温暖、具体，避免空泛套话\n"
+        "- 不出现分数、等级、排名，不出现“不足/待提升/较差”等负面词\n"
+        "- 不超过 40 个字\n\n"
+        f"学生口述：\n{text}\n\n"
+        f"对话记录：\n{dialogue_block or '（无）'}"
+    )
+    try:
+        feedback = await llm.chat(
+            [
+                {"role": "system", "content": "你是一位给小学生写鼓励反馈的老师，只说肯定的话。"},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+            max_tokens=200,
+        )
+        feedback = (feedback or "").strip().strip('"')
+        if not feedback:
+            feedback = _FLASH_FEEDBACK_FALLBACK
+    except Exception:
+        feedback = _FLASH_FEEDBACK_FALLBACK
+    return {"feedback": feedback}
 
 
 @app.patch("/api/responses/{rid}/status", response_model=StudentResponseOut)
@@ -917,6 +997,7 @@ async def assess_one_response(rid: int, background_tasks: BackgroundTasks, db: S
         resp.ai_confidence = result.get("confidence", "uncertain")
         resp.ai_reasoning = result.get("reasoning", {})
         resp.ai_extracted_features = result.get("extracted_features", {})
+        resp.ai_bonus_flags = result.get("bonus_flags", [])
         resp.ai_note = result.get("note", "")
         resp.ai_suggested_tags = result.get("suggested_tags", [])
         new_tags = result.get("suggested_tags", [])
@@ -1135,9 +1216,9 @@ async def generate_comment(cid: int, body: CommentRequest, db: Session = Depends
     resp_map = {r.topic_id: r for r in responses}
 
     dim_labels = {
-        "clarity": "清晰性", "interpretation": "解释力", "evidence_awareness": "证据意识",
-        "relevance": "相关性", "inference": "因果推理", "evidence_use": "证据使用",
-        "argument_evaluation": "论证质量", "depth_breadth": "深度广度", "self_regulation": "反思调节",
+        "position": "立意（观点鲜明）", "material": "选材（言之有物）",
+        "structure": "结构（条理清晰）", "language": "语言（用词准确）",
+        "perspective": "视角（换位思考）",
     }
     tier_labels = {"basic": "低年级（1-2年级）", "developing": "中年级（3-5年级）", "advancing": "高年级（6-7年级）"}
 
@@ -1162,6 +1243,7 @@ async def generate_comment(cid: int, body: CommentRequest, db: Session = Depends
 
         tags = r.teacher_tags or r.ai_suggested_tags or []
         note = r.teacher_note or ""
+        bonus = r.ai_bonus_flags or []
 
         topic_data.append({
             "order": topic.order,
@@ -1169,6 +1251,7 @@ async def generate_comment(cid: int, body: CommentRequest, db: Session = Depends
             "scores": "、".join(score_parts) if score_parts else "无评分",
             "tags": tags,
             "note": note,
+            "bonus": bonus,
             "reviewed": is_reviewed,
             "raw_text_preview": (r.raw_text[:80] + "...") if len(r.raw_text) > 80 else r.raw_text,
         })
@@ -1183,6 +1266,8 @@ async def generate_comment(cid: int, body: CommentRequest, db: Session = Depends
         lines.append(f"  评分：{td['scores']}")
         if td['tags']:
             lines.append(f"  教师选用标签：{'、'.join(td['tags'])}")
+        if td['bonus']:
+            lines.append(f"  加分项：{'、'.join(td['bonus'])}（已按规则升级评级）")
         if td['note']:
             lines.append(f"  教师批注：{td['note']}")
         if not td['reviewed']:
@@ -1336,15 +1421,11 @@ async def send_comment(
 def _build_comment_card_content(student, response, draft: str) -> str:
     """Markdown body for the Feishu comment card."""
     dim_labels = {
-        "clarity": "清晰性",
-        "interpretation": "解释力",
-        "evidence_awareness": "证据意识",
-        "relevance": "相关性",
-        "inference": "因果推理",
-        "evidence_use": "证据使用",
-        "argument_evaluation": "论证质量",
-        "depth_breadth": "深度广度",
-        "self_regulation": "反思调节",
+        "position": "立意（观点鲜明）",
+        "material": "选材（言之有物）",
+        "structure": "结构（条理清晰）",
+        "language": "语言（用词准确）",
+        "perspective": "视角（换位思考）",
     }
     lines = [f"**学生**：{student.name}（{student.cognitive_tier}）"]
     if response is not None and response.topic:
@@ -1359,6 +1440,9 @@ def _build_comment_card_content(student, response, draft: str) -> str:
                 for dim, rating in scores.items()
             ]
             lines.append(f"\n**评分摘要**：{'、'.join(score_parts)}")
+        bonus = response.ai_bonus_flags or []
+        if bonus:
+            lines.append(f"**加分项**：{'、'.join(bonus)}（已按规则升级评级）")
         tags = response.teacher_tags or response.ai_suggested_tags or []
         if tags:
             lines.append(f"**亮点标签**：{'、'.join(tags)}")
@@ -1374,9 +1458,9 @@ async def batch_generate_comments(cid: int, db: Session = Depends(get_db)):
     topics = db.query(DebateTopic).filter(DebateTopic.course_id == cid).order_by(DebateTopic.order).all()
 
     dim_labels = {
-        "clarity": "清晰性", "interpretation": "解释力", "evidence_awareness": "证据意识",
-        "relevance": "相关性", "inference": "因果推理", "evidence_use": "证据使用",
-        "argument_evaluation": "论证质量", "depth_breadth": "深度广度", "self_regulation": "反思调节",
+        "position": "立意（观点鲜明）", "material": "选材（言之有物）",
+        "structure": "结构（条理清晰）", "language": "语言（用词准确）",
+        "perspective": "视角（换位思考）",
     }
     tier_labels = {"basic": "低年级（1-2年级）", "developing": "中年级（3-5年级）", "advancing": "高年级（6-7年级）"}
 
@@ -1408,11 +1492,14 @@ async def batch_generate_comments(cid: int, db: Session = Depends(get_db)):
                     score_parts.append(f"{label}: {rating}")
             tags = r.teacher_tags or r.ai_suggested_tags or []
             note = r.teacher_note or ""
+            bonus = r.ai_bonus_flags or []
 
             lines = [f"辩题{topic.order}：{topic.title}"]
             lines.append(f"  评分：{'、'.join(score_parts) if score_parts else '无评分'}")
             if tags:
                 lines.append(f"  教师选用标签：{'、'.join(tags)}")
+            if bonus:
+                lines.append(f"  加分项：{'、'.join(bonus)}（已按规则升级评级）")
             if note:
                 lines.append(f"  教师批注：{note}")
             if not is_reviewed:
@@ -1486,13 +1573,13 @@ def get_calibrations(cid: int, limit: int = 10, db: Session = Depends(get_db)):
     )
 
     dim_labels = {
-        "clarity": "清晰性", "interpretation": "解释力",
-        "evidence_awareness": "证据意识", "relevance": "相关性",
-        "inference": "因果推理", "evidence_use": "证据使用",
-        "argument_evaluation": "论证质量", "depth_breadth": "深度广度",
-        "self_regulation": "反思调节",
-        # Chinese keys (for older records)
-        "清晰性": "清晰性", "解释力": "解释力", "证据意识": "证据意识",
+        "position": "立意（观点鲜明）", "material": "选材（言之有物）",
+        "structure": "结构（条理清晰）", "language": "语言（用词准确）",
+        "perspective": "视角（换位思考）",
+        # Legacy keys (for older records)
+        "clarity": "立意（观点鲜明）", "relevance": "结构（条理清晰）",
+        "evidence_use": "选材（言之有物）", "inference": "结构（条理清晰）",
+        "argument_evaluation": "结构（条理清晰）", "depth_breadth": "视角（换位思考）",
     }
 
     def format_scores(scores: dict) -> str:
@@ -1797,14 +1884,14 @@ def student_report(sid: int, db: Session = Depends(get_db)):
 
     scores = response.teacher_dimension_scores or response.ai_dimension_scores or {}
     dim_labels = {
-        "clarity": "立意（观点鲜明）",
-        "interpretation": "立意（观点鲜明）",
-        "evidence_awareness": "选材（言之有物）",
-        "evidence_use": "选材（言之有物）",
-        "relevance": "结构（条理清晰）",
-        "inference": "结构（条理清晰）",
-        "argument_evaluation": "结构（条理清晰）",
-        "depth_breadth": "视角（换位思考）",
+        "position": "立意（观点鲜明）", "material": "选材（言之有物）",
+        "structure": "结构（条理清晰）", "language": "语言（用词准确）",
+        "perspective": "视角（换位思考）",
+        # Legacy keys (for older records)
+        "clarity": "立意（观点鲜明）", "interpretation": "立意（观点鲜明）",
+        "evidence_awareness": "选材（言之有物）", "evidence_use": "选材（言之有物）",
+        "relevance": "结构（条理清晰）", "inference": "结构（条理清晰）",
+        "argument_evaluation": "结构（条理清晰）", "depth_breadth": "视角（换位思考）",
         "self_regulation": "视角（换位思考）",
     }
     dimensions = {}
@@ -1820,7 +1907,8 @@ def student_report(sid: int, db: Session = Depends(get_db)):
         "topic_title": response.topic.title if response.topic else "",
         "dimensions": dimensions,
         "teacher_comment": response.teacher_note or "",
-        "rating": response.teacher_rating or "",
+        "rating": _upgrade_rating(response.teacher_rating or "", response.ai_bonus_flags or []),
+        "bonus_flags": response.ai_bonus_flags or [],
         "reviewed": response.teacher_reviewed,
         "next_steps": ["下节课重点关注" + (response.teacher_rating or "本次表达") + "对应的引导方向"],
     }

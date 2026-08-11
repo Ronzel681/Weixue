@@ -5,6 +5,25 @@ import { subscribeStatus, publishStatus } from '../utils/statusBus';
 let _liveSubscribedCid = null;
 let _liveUnsubscribe = null;
 
+// 模式/暂停持久化：演示环境里学生端是独立窗口，挂载时必须能读到教师端当前设置，
+// 不能只依赖“切换时广播一次”（后打开的窗口/HMR 重挂载会错过）。
+const _readLiveMode = () => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('weixue-live-mode') === 'confirm' ? 'confirm' : 'auto';
+  } catch { return 'auto'; }
+};
+const _readLivePaused = () => {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('weixue-live-paused') === '1';
+  } catch { return false; }
+};
+const _persistLiveMode = (mode) => {
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem('weixue-live-mode', mode); } catch { /* ignore */ }
+};
+const _persistLivePaused = (paused) => {
+  try { if (typeof localStorage !== 'undefined') localStorage.setItem('weixue-live-paused', paused ? '1' : '0'); } catch { /* ignore */ }
+};
+
 const useStore = create((set, get) => ({
   // ── State ──────────────────────────────────────────────────
   courseId: null,
@@ -24,6 +43,13 @@ const useStore = create((set, get) => ({
   liveRounds: {},               // { [responseId]: student-round count }
   liveAdopted: {},              // { [responseId]: adopted teacher question }
   liveBusy: {},                 // { [responseId]: true } while an action is in flight
+  liveTranscripts: {},          // { [responseId]: 实时转写片段（学生正在说什么） }
+  liveAiQuestions: {},          // { [responseId]: AI 自动追问的问题 }
+  liveFinished: {},             // { [responseId]: 'student' | 'teacher' 谁结束了对话 }
+  liveEchoRisk: {},             // { [responseId]: true 最近一轮有复述风险 }
+  liveMode: _readLiveMode(),    // 'auto' 学生端直接追问 / 'confirm' 教师端确认后发送
+  livePaused: _readLivePaused(),// 全局暂停 AI 伴学
+  livePendingSuggestions: {},   // { [responseId]: {questions, echoRisk, note} } 确认模式待发送
   loading: false,
   assessing: false,     // was "grading"
   assessmentProgress: null,
@@ -163,6 +189,8 @@ const useStore = create((set, get) => ({
       set({
         liveStatus: {}, liveDialogue: {}, liveSuggestions: {},
         liveRounds: {}, liveAdopted: {}, liveBusy: {},
+        liveTranscripts: {}, liveAiQuestions: {}, liveFinished: {}, liveEchoRisk: {},
+        livePendingSuggestions: {},
       });
       await get().loadCourse(cid);
     } catch (e) {
@@ -173,6 +201,21 @@ const useStore = create((set, get) => ({
   // ── Live classroom mode ─────────────────────────────────
   setMode: (mode) => set({ currentMode: mode }),
   setLiveTopic: (topicId) => set({ liveTopicId: topicId }),
+
+  // 下一环节：切到下一个辩题，并清空本轮 live 会话状态（作答数据保留在库中）
+  advanceLiveTopic: () => {
+    const { topics, liveTopicId } = get();
+    if (!topics || topics.length === 0) return;
+    const idx = topics.findIndex(t => t.id === liveTopicId);
+    if (idx < 0 || idx >= topics.length - 1) return;
+    const next = topics[idx + 1];
+    set({
+      liveTopicId: next.id,
+      liveStatus: {}, liveDialogue: {}, liveSuggestions: {}, liveRounds: {},
+      liveAdopted: {}, liveBusy: {}, liveTranscripts: {}, liveAiQuestions: {},
+      liveFinished: {}, liveEchoRisk: {}, livePendingSuggestions: {},
+    });
+  },
 
   initLiveStatus: () => {
     // liveStatus only tracks the CURRENT live session. Pre-existing historical
@@ -215,8 +258,48 @@ const useStore = create((set, get) => ({
         get()._upsertResponse(evt.response);
       }
       if (!evt.responseId) return;
+      if (evt.transcript !== undefined) {
+        set(state => ({ liveTranscripts: { ...state.liveTranscripts, [evt.responseId]: evt.transcript } }));
+      }
       if (evt.type === 'teacher_question') {
         set(state => ({ liveAdopted: { ...state.liveAdopted, [evt.responseId]: evt.question || '' } }));
+        return;
+      }
+      if (evt.type === 'ai_question') {
+        set(state => ({
+          liveAiQuestions: { ...state.liveAiQuestions, [evt.responseId]: evt.question || '' },
+          liveEchoRisk: { ...state.liveEchoRisk, [evt.responseId]: !!evt.echoRisk },
+        }));
+        return;
+      }
+      if (evt.type === 'student_finished' || evt.type === 'teacher_finished') {
+        set(state => ({
+          liveFinished: {
+            ...state.liveFinished,
+            [evt.responseId]: evt.type === 'teacher_finished' ? 'teacher' : 'student',
+          },
+        }));
+        return;
+      }
+      if (evt.type === 'live_mode') {
+        set({ liveMode: evt.mode === 'confirm' ? 'confirm' : 'auto' });
+        return;
+      }
+      if (evt.type === 'live_pause') {
+        set({ livePaused: !!evt.paused });
+        return;
+      }
+      if (evt.type === 'ai_suggestion_ready') {
+        set(state => ({
+          livePendingSuggestions: {
+            ...state.livePendingSuggestions,
+            [evt.responseId]: {
+              questions: evt.questions || [],
+              echoRisk: !!evt.echoRisk,
+              note: evt.note || '',
+            },
+          },
+        }));
         return;
       }
       const prevRound = get().liveRounds[evt.responseId] || 0;
@@ -229,12 +312,9 @@ const useStore = create((set, get) => ({
         set(state => ({ liveAdopted: { ...state.liveAdopted, [evt.responseId]: '' } }));
       }
       if (evt.status === 'submitted') {
-        // Auto-generate scaffolding suggestions when a new answer arrives.
-        setTimeout(() => {
-          get().loadDialogue(evt.responseId);
-          const r = get().findResponse(evt.responseId);
-          if (r) get().suggestTurnFor(r.id);
-        }, 250);
+        // 学生端 AI 自动追问（StudentWindow.autoAsk）已负责生成下一问，
+        // 教师端这里只刷新对话历史，避免两处重复生成导致“错位”。
+        setTimeout(() => { get().loadDialogue(evt.responseId); }, 250);
       }
     });
   },
@@ -290,6 +370,59 @@ const useStore = create((set, get) => ({
       console.warn('adoptSuggestion failed:', e);
       return null;
     }
+  },
+
+  finishLiveDialogue: async (responseId, by = 'teacher') => {
+    set(state => ({ liveFinished: { ...state.liveFinished, [responseId]: by } }));
+    publishStatus(get().courseId, {
+      responseId,
+      type: by === 'teacher' ? 'teacher_finished' : 'student_finished',
+    });
+    try {
+      await api.finishDialogue(responseId, by);
+    } catch (e) {
+      console.warn('finishDialogue persist failed:', e);
+    }
+  },
+
+  setLiveMode: (mode) => {
+    const next = mode === 'confirm' ? 'confirm' : 'auto';
+    set({ liveMode: next });
+    _persistLiveMode(next);
+    publishStatus(get().courseId, { type: 'live_mode', mode: next });
+  },
+
+  togglePause: () => {
+    const paused = !get().livePaused;
+    set({ livePaused: paused });
+    _persistLivePaused(paused);
+    publishStatus(get().courseId, { type: 'live_pause', paused });
+  },
+
+  sendAiSuggestion: async (responseId, question) => {
+    try {
+      const updated = await api.appendTurn(responseId, { role: 'ai_suggestion', content: question, turn_type: 'scaffold' });
+      get()._upsertResponse(updated);
+      set(state => {
+        const next = { ...state.livePendingSuggestions };
+        delete next[responseId];
+        return { livePendingSuggestions: next };
+      });
+      publishStatus(get().courseId, { responseId, type: 'ai_question', question });
+      await get().loadDialogue(responseId);
+      return updated;
+    } catch (e) {
+      console.warn('sendAiSuggestion failed:', e);
+      return null;
+    }
+  },
+
+  ignoreSuggestion: (responseId) => {
+    set(state => {
+      const next = { ...state.livePendingSuggestions };
+      delete next[responseId];
+      return { livePendingSuggestions: next };
+    });
   },
 
   appendStudentTurn: async (responseId, content) => {

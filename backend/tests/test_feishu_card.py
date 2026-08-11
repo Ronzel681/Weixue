@@ -204,7 +204,7 @@ class BitableSchemaTests(unittest.IsolatedAsyncioTestCase):
             {u["property"]["options"][-1]["name"] for u in calls["updated"]},
             {
                 SINGLE_SELECT_OPTIONS[name][-1]
-                for name in ("来源", "AI置信度", "状态")
+                for name in ("来源", "AI置信度", "加分项", "状态")
             },
         )
 
@@ -267,8 +267,8 @@ resp = StudentResponse(
     student_id=student.id,
     topic_id=topic.id,
     raw_text="我认为应该限制使用。",
-    ai_dimension_scores={"clarity": "B", "relevance": "A"},
-    ai_suggested_tags=["证据意识"],
+    ai_dimension_scores={"position": "B", "material": "A-", "structure": "B+", "language": "A", "perspective": "B+"},
+    ai_suggested_tags=["选材具体"],
     teacher_reviewed=False,
     processing_status="submitted",
 )
@@ -328,7 +328,7 @@ results = {}
 r = signed_post(
     card(
         "review_confirm",
-        value_extra={"dimension_scores": {"clarity": "A", "relevance": "A"}},
+        value_extra={"dimension_scores": {"position": "A", "material": "A", "structure": "A", "language": "A", "perspective": "A"}},
     )
 )
 results["confirm_status"] = r.status_code
@@ -342,7 +342,7 @@ results["processing_status"] = resp.processing_status
 results["calibrations"] = db.query(CalibrationRecord).count()
 results["tag_use_count"] = (
     db.query(DimensionTag)
-    .filter(DimensionTag.name == "证据意识")
+    .filter(DimensionTag.name == "选材具体")
     .first()
     .use_count
 )
@@ -430,7 +430,7 @@ class CardCallbackAPITests(unittest.TestCase):
         self.assertEqual(result["confirm_status"], 200)
         self.assertEqual(result["confirm_toast"]["type"], "success")
         self.assertTrue(result["teacher_reviewed"])
-        self.assertEqual(result["teacher_scores"], {"clarity": "A", "relevance": "A"})
+        self.assertEqual(result["teacher_scores"], {"position": "A", "material": "A", "structure": "A", "language": "A", "perspective": "A"})
         self.assertEqual(result["processing_status"], "processed")
         self.assertEqual(result["calibrations"], 1)
         self.assertEqual(result["tag_use_count"], 1)

@@ -60,6 +60,7 @@ TABLE_RESPONSES = {
     "AI评分摘要": FIELD_TEXT,
     "AI置信度": FIELD_SINGLE_SELECT,
     "AI建议标签": FIELD_MULTI_SELECT,
+    "加分项": FIELD_MULTI_SELECT,
     "教师评分": FIELD_TEXT,
     "教师标签": FIELD_MULTI_SELECT,
     "教师批注": FIELD_TEXT,
@@ -74,6 +75,7 @@ SINGLE_SELECT_OPTIONS: dict[str, list[str]] = {
     "认知梯段": ["基础层", "发展层", "进阶层"],
     "来源": ["手动录入", "音频转写"],
     "AI置信度": ["高", "低", "不确定"],
+    "加分项": ["有自己", "有新意"],
     "状态": ["待评估", "AI已评", "教师已审"],
 }
 

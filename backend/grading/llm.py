@@ -44,7 +44,7 @@ class LLMClient:
         temperature: float = 0.3,
         max_tokens: int = 2000,
     ) -> str:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers={
@@ -61,14 +61,40 @@ class LLMClient:
             resp.raise_for_status()
             return resp.json()["choices"][0]["message"]["content"]
 
+    @staticmethod
+    def _extract_json(raw: str) -> str:
+        """Extract the JSON object from an LLM reply (handles code fences and prose)."""
+        text = raw.strip()
+        # 去掉 Markdown 代码围栏（```json / ```）
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        # 截取第一个 { 到最后一个 } 之间的内容，忽略前后说明文字
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start : end + 1]
+        return text
+
     async def chat_json(self, messages: list[dict], **kwargs) -> dict:
-        """Call LLM and parse the response as JSON (strips markdown fences if present)."""
+        """Call LLM and parse the response as JSON, with one strict-JSON retry."""
         raw = await self.chat(messages, **kwargs)
-        # Strip ```json ... ``` fences
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3]
-        cleaned = cleaned.strip()
-        return json.loads(cleaned)
+        try:
+            return json.loads(self._extract_json(raw))
+        except (ValueError, TypeError) as exc:
+            # 常见于 max_tokens 截断或模型在字符串里输出字面换行：明确要求只输出合法 JSON 重试一次。
+            retry_messages = [
+                *messages,
+                {
+                    "role": "user",
+                    "content": (
+                        f"你上一次的输出不是合法 JSON（{exc}）。"
+                        "请只输出一个合法 JSON 对象，不要 Markdown 代码块，"
+                        "字符串内的换行请用 \\n 转义，不要输出字面换行。"
+                    ),
+                },
+            ]
+            raw2 = await self.chat(retry_messages, **kwargs)
+            return json.loads(self._extract_json(raw2))

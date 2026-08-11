@@ -115,7 +115,7 @@ with TestClient(main.app) as client:
     # ── 5) Success scenario: canned evaluation -> processed + stored ────
     canned = {
         "cleaned_text": "我认为应该放生，因为动物属于大自然。",
-        "dimension_scores": {"清晰性": "A", "解释力": "B+", "证据意识": "B"},
+        "dimension_scores": {"position": "A", "material": "B+", "structure": "B", "language": "A-", "perspective": "B+"},
         "confidence": "certain_good",
         "reasoning": {"summary": "测试推理"},
         "extracted_features": {"claim": "应该放生"},
@@ -137,7 +137,7 @@ with TestClient(main.app) as client:
     rows = db.query(StudentResponse).filter(StudentResponse.id.in_(ok_ids)).all()
     out["ok_all_certain"] = all(r.ai_confidence == "certain_good" for r in rows)
     out["ok_scores"] = all(
-        (r.ai_dimension_scores or {}).get("清晰性") == "A" for r in rows
+        (r.ai_dimension_scores or {}).get("position") == "A" for r in rows
     )
     out["ok_tag_synced"] = (
         db.query(DimensionTag)
