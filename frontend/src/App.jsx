@@ -30,7 +30,12 @@ const TIER_LABEL = { basic: '低年级', developing: '中年级', advancing: '�
 export default function App() {
   const { course, courses, currentTab, setTab, currentMode, setMode, loading, assessing, assessmentProgress, loadAllCourses, selectCourse, createCourse, runAssessment, resetAll } = useStore();
 
-  useEffect(() => { loadAllCourses(); }, []);
+  useEffect(() => {
+    // Deep link support (e.g. from Feishu card jump buttons): /?tab=comments
+    const t = new URLSearchParams(window.location.search).get('tab');
+    if (t && TABS.some((x) => x.key === t)) setTab(t);
+    loadAllCourses();
+  }, []);
 
   if (loading && !course) {
     return (

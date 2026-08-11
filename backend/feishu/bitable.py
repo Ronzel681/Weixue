@@ -9,7 +9,9 @@ APIs (verified 2026-08):
 Field type codes (write format):
 - text = 1, number = 2, single select = 3, multi select = 4,
   date = 5 (ms timestamp), checkbox = 7, person = 11 (open_id)
-- single select value: {"text": "..."}; multi select value: [{"text": "..."}]
+- single select write value: "选项名" (plain string); multi select: ["选项一", "选项二"].
+  The {"text": "..."} object forms are READ shapes and fail on write with
+  SingleSelectFieldConvFail (verified against live API 2026-08).
 """
 
 from typing import Any, Optional
@@ -65,6 +67,16 @@ TABLE_RESPONSES = {
     "更新时间": FIELD_DATE,
 }
 
+# Single-select options that must exist for the sync builders to succeed.
+# Keyed by field name; merged across all tables that use the field.
+SINGLE_SELECT_OPTIONS: dict[str, list[str]] = {
+    "类型": ["两难", "事实观点", "因果"],
+    "认知梯段": ["基础层", "发展层", "进阶层"],
+    "来源": ["手动录入", "音频转写"],
+    "AI置信度": ["高", "低", "不确定"],
+    "状态": ["待评估", "AI已评", "教师已审"],
+}
+
 
 class BitableService:
     def __init__(
@@ -113,3 +125,97 @@ class BitableService:
         return await self.client.request(
             "POST", f"{self._base(table_id)}/records/batch_update", json_body={"records": records}
         )
+
+    # ── Field management (schema bootstrap, best effort) ────────────────
+
+    async def list_fields(self, table_id: str) -> list[dict]:
+        """List existing fields of a table (used to make ensure_schema idempotent)."""
+        payload = await self.client.request(
+            "GET", f"{self._base(table_id)}/fields", params={"page_size": 100}
+        )
+        return payload.get("items", []) if isinstance(payload, dict) else []
+
+    async def create_field(
+        self,
+        table_id: str,
+        field_name: str,
+        field_type: int,
+        options: Optional[list[str]] = None,
+    ) -> Any:
+        """Create a field; single/multi-select fields get their option list."""
+        body: dict = {"field_name": field_name, "type": field_type}
+        if options:
+            body["property"] = {"options": [{"name": name} for name in options]}
+        return await self.client.request(
+            "POST", f"{self._base(table_id)}/fields", json_body=body
+        )
+
+    async def update_field_options(
+        self, table_id: str, field_id: str, options: list[str]
+    ) -> Any:
+        """Append options to a single-select field (replace-style update)."""
+        body = {
+            "property": {"options": [{"name": name} for name in options]},
+        }
+        return await self.client.request(
+            "PUT", f"{self._base(table_id)}/fields/{field_id}", json_body=body
+        )
+
+    async def ensure_schema(self, schemas: Optional[dict] = None) -> dict:
+        """Idempotently create missing fields and single-select options.
+
+        schemas maps table_key -> {field_name: field_type}; defaults to the four
+        built-in table schemas. Options come from SINGLE_SELECT_OPTIONS.
+        Returns a per-table report; API failures are captured per table instead
+        of aborting the whole run.
+        """
+        schemas = schemas or {
+            "courses": TABLE_COURSES,
+            "topics": TABLE_TOPICS,
+            "students": TABLE_STUDENTS,
+            "responses": TABLE_RESPONSES,
+        }
+        report: dict[str, dict] = {}
+        for table_key, schema in schemas.items():
+            table_id = (self.table_ids or {}).get(table_key, "")
+            if not table_id:
+                report[table_key] = {"status": "skipped", "reason": "table_id not configured"}
+                continue
+            created: list[str] = []
+            updated_options: list[str] = []
+            failed: list[str] = []
+            try:
+                existing = {f.get("field_name", ""): f for f in await self.list_fields(table_id)}
+                for field_name, field_type in schema.items():
+                    try:
+                        field = existing.get(field_name)
+                        if field is None:
+                            options = SINGLE_SELECT_OPTIONS.get(field_name)
+                            await self.create_field(table_id, field_name, field_type, options)
+                            created.append(field_name)
+                            continue
+                        # Idempotent option bootstrap for select fields.
+                        want = SINGLE_SELECT_OPTIONS.get(field_name)
+                        if not want:
+                            continue
+                        have = {
+                            opt.get("name")
+                            for opt in ((field.get("property") or {}).get("options") or [])
+                        }
+                        missing = [name for name in want if name not in have]
+                        if missing:
+                            await self.update_field_options(
+                                table_id, field.get("field_id", ""), want
+                            )
+                            updated_options.append(field_name)
+                    except Exception as exc:  # noqa: BLE001 - report per field
+                        failed.append(f"{field_name}: {exc}")
+                report[table_key] = {
+                    "status": "ok",
+                    "created_fields": created,
+                    "updated_options": updated_options,
+                    "failed": failed,
+                }
+            except Exception as exc:  # noqa: BLE001 - report per table
+                report[table_key] = {"status": "error", "error": str(exc)}
+        return report

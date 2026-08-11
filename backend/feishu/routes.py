@@ -10,16 +10,36 @@ Endpoints:
 - POST /api/feishu/card                - interactive card callback (M4)
 """
 
+import hashlib
+import hmac
+import json
 import os
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
-from database import DebateTopic, FeishuBinding, Student, StudentResponse, get_db
+from database import (
+    DebateTopic,
+    FeishuBinding,
+    SessionLocal,
+    Student,
+    StudentResponse,
+    get_db,
+)
 
 from .bot import BotService
+from .card_actions import dispatch_card_action
 from .client import (
     FeishuAPIError,
     FeishuClient,
@@ -57,6 +77,31 @@ async def close_client() -> None:
     if _client is not None:
         await _client.close()
         _client = None
+
+
+async def _sync_response_after_review(response_id: int) -> None:
+    """Fire-and-forget Bitable sync after a card callback confirms a review."""
+    db = SessionLocal()
+    try:
+        syncer = BitableSyncer(get_client(), _feishu_config)
+        if syncer.available:
+            await syncer.sync_response(db, response_id)
+    except Exception:
+        # Sync failures are reported via /api/feishu/bitable/status only.
+        pass
+    finally:
+        db.close()
+
+
+def _verify_event_signature(
+    raw_body: bytes, timestamp: str, nonce: str, signature: str
+) -> bool:
+    """sha256(timestamp + nonce + encrypt_key + raw_body) per official docs."""
+    bs = (
+        f"{timestamp}{nonce}{_feishu_config.encrypt_key}".encode("utf-8")
+        + raw_body
+    )
+    return hmac.compare_digest(hashlib.sha256(bs).hexdigest(), signature or "")
 
 
 @router.get("/health")
@@ -205,26 +250,103 @@ async def minute_status(
 
 
 @router.post("/events")
-async def feishu_events(body: dict):
+async def feishu_events(
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
     """Feishu event subscription callback.
 
-    Handles url_verification (challenge) and acknowledges other events.
-    TODO(M4): dispatch im.message.receive_v1 / minutes.minute.generated_v1.
+    Handles url_verification (challenge), verifies the X-Lark-Signature when an
+    Encrypt Key is configured, and dispatches im.message.receive_v1 to the bot.
     """
+    raw_body = await request.body()
+    timestamp = request.headers.get("X-Lark-Request-Timestamp", "")
+    nonce = request.headers.get("X-Lark-Request-Nonce", "")
+    signature = request.headers.get("X-Lark-Signature", "")
+    if _feishu_config.encrypt_key and signature and not _verify_event_signature(
+        raw_body, timestamp, nonce, signature
+    ):
+        raise HTTPException(401, "invalid event signature")
+    try:
+        body = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise HTTPException(400, "invalid event body")
     try:
         event = BotService.handle_event(_feishu_config, body)
     except ValueError as exc:
         raise HTTPException(403, str(exc))
     if "challenge" in event:
         return event
+    if event.get("type") == "im.message.receive_v1":
+        payload = event.get("event") or {}
+        message = payload.get("message") or {}
+        message_id = message.get("message_id", "")
+        msg_type = message.get("message_type", "")
+        text = ""
+        if msg_type == "text":
+            try:
+                text = json.loads(message.get("content", "{}")).get("text", "")
+            except (TypeError, ValueError):
+                text = ""
+        if message_id and ("评语" in text or "帮助" in text):
+            background_tasks.add_task(_reply_bot_help, message_id)
     return {"code": 0, "msg": "ack"}
 
 
+async def _reply_bot_help(message_id: str) -> None:
+    """Lightweight im.message.receive_v1 dispatch: answer help-ish messages."""
+    try:
+        bot = BotService(get_client())
+        await bot.reply_text(
+            message_id,
+            "思辨星机器人：教师可在网页端生成评语后由机器人推送确认卡片；"
+            "如需帮助请联调群内说明。",
+        )
+    except Exception:
+        pass
+
+
 @router.post("/card")
-async def feishu_card(body: dict):
+async def feishu_card(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Interactive card callback (button clicks).
 
-    TODO(M4): verify X-Lark-Signature header, then wire card buttons to the
-    teacher review / comment confirm flows (see 飞书集成技术方案.md 4.3).
+    Verifies `X-Lark-Signature` (sha1 over timestamp + nonce + verification
+    token + raw body), decrypts when Encrypt Key is configured, checks the
+    callback `header.token`, then delegates to the shared dispatcher (also used
+    by the WebSocket long-connection listener in feishu.ws_listener).
     """
-    return {"code": 0, "msg": "ack", "received": bool(body)}
+    raw_body = await request.body()
+    timestamp = request.headers.get("X-Lark-Request-Timestamp", "")
+    nonce = request.headers.get("X-Lark-Request-Nonce", "")
+    signature = request.headers.get("X-Lark-Signature", "")
+    if not BotService.verify_card_signature(
+        _feishu_config, raw_body, timestamp, nonce, signature
+    ):
+        raise HTTPException(401, "invalid card callback signature")
+    try:
+        plaintext = BotService.decrypt_card_payload(_feishu_config, raw_body)
+        payload = json.loads(plaintext.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+
+    header = payload.get("header") or {}
+    if (
+        _feishu_config.verification_token
+        and header.get("token") != _feishu_config.verification_token
+    ):
+        raise HTTPException(403, "card callback token mismatch")
+
+    event = payload.get("event") or {}
+    action = event.get("action") or {}
+    value = action.get("value") or {}
+    return dispatch_card_action(
+        db,
+        value,
+        schedule_sync=lambda rid: background_tasks.add_task(
+            _sync_response_after_review, rid
+        ),
+    )

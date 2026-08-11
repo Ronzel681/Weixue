@@ -1,9 +1,16 @@
 import json
+import os
 import unittest
 
 import httpx
 
 from feishu.client import FeishuClient
+
+# feishu.client's import runs load_dotenv on backend/.env; purge any real
+# credentials so "unconfigured" tests stay deterministic on machines that
+# already have live Feishu config.
+for _key in [k for k in os.environ if k.startswith("FEISHU_")]:
+    os.environ.pop(_key, None)
 
 
 class FeishuClientTests(unittest.IsolatedAsyncioTestCase):

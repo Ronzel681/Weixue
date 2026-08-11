@@ -171,6 +171,7 @@ export default function StudentWindow({ studentId }) {
       // Simulated recording fallback (demo-friendly).
       setRecording(true);
       setSimNote('（模拟录音中…）');
+      publish('recording');
       for (let i = 3; i >= 0; i--) {
         setSimCountdown(i);
         await new Promise(r => setTimeout(r, 700));

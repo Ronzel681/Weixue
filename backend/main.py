@@ -30,7 +30,7 @@ from schemas import (
     CompanionTurnCreate, CompanionTurnOut, StatusUpdate, SuggestTurnOut,
     ASRProviderInfo, ASRSettingOut, ASRSettingUpdate,
 )
-from grading.evaluator import AssessmentEngine
+from grading.evaluator import AssessmentEngine, COMMENT_TONE_GUIDE
 from grading.llm import LLMClient
 from grading.rubric_loader import RubricLoader
 from companion import CompanionEngine
@@ -39,6 +39,8 @@ from feishu.routes import router as feishu_router
 from asr import ASRClient, ASRError
 from grading.ratings import rating_to_value
 from feishu import FeishuAPIError, FeishuClient, FeishuConfigurationError
+from feishu.bot import BotService
+from feishu.reviews import apply_teacher_review, sync_tags_to_library
 from feishu.sync import BitableSyncer, bitable_status
 
 app = FastAPI(title="思辨星 · 少儿思辨能力认知自适应评估系统", version="0.1.0")
@@ -650,7 +652,7 @@ async def _run_assessment(cid: int, students, topics):
                     # Sync AI suggested tags to DimensionTag library
                     new_tags = result.get("suggested_tags", [])
                     if new_tags:
-                        _sync_tags_to_library(db, cid, new_tags, source="ai")
+                        sync_tags_to_library(db, cid, new_tags, source="ai")
 
                     db.commit()
 
@@ -747,27 +749,6 @@ def reset_course(cid: int, db: Session = Depends(get_db)):
     return {"ok": True, "responses_reset": len(responses)}
 
 
-def _sync_tags_to_library(db, course_id, tag_names, source="teacher"):
-    """Ensure each tag name exists in DimensionTag and increment use_count."""
-    for name in tag_names:
-        if not name or not name.strip():
-            continue
-        tag = db.query(DimensionTag).filter(
-            DimensionTag.course_id == course_id,
-            DimensionTag.name == name,
-        ).first()
-        if tag:
-            tag.use_count = (tag.use_count or 0) + 1
-        else:
-            tag = DimensionTag(
-                course_id=course_id,
-                name=name,
-                source="ai_new" if source == "ai" else "teacher",
-                use_count=1,
-            )
-            db.add(tag)
-
-
 @app.post("/api/responses/{rid}/review", response_model=StudentResponseOut)
 def review_response(
     rid: int,
@@ -780,55 +761,15 @@ def review_response(
     if not resp:
         raise HTTPException(404, "Response not found")
 
-    # Save calibration record if teacher modified dimension scores
-    if body.dimension_scores and resp.ai_dimension_scores:
-        modifications = []
-        for dim, new_rating in body.dimension_scores.items():
-            old_rating = resp.ai_dimension_scores.get(dim)
-            if old_rating and old_rating != new_rating:
-                modifications.append({
-                    "dimension": dim,
-                    "from_rating": old_rating,
-                    "to_rating": new_rating,
-                    "reason": body.note or "",
-                })
-
-        if modifications:
-            record = CalibrationRecord(
-                response_id=rid,
-                teacher_id="default",
-                ai_original_scores=resp.ai_dimension_scores,
-                teacher_final_scores=body.dimension_scores,
-                modifications=modifications,
-                note=body.note,
-            )
-            db.add(record)
-
-    resp.teacher_dimension_scores = body.dimension_scores
-    resp.teacher_confidence_override = body.confidence_override
-
-    # Sync teacher-selected tags to DimensionTag library (diff-based)
-    old_tags = set(resp.teacher_tags or [])
-    new_tags = set(body.tags or [])
-    course_id = resp.topic.course_id
-
-    # Tags removed by teacher → decrement use_count
-    for name in old_tags - new_tags:
-        tag = db.query(DimensionTag).filter(
-            DimensionTag.course_id == course_id,
-            DimensionTag.name == name,
-        ).first()
-        if tag:
-            tag.use_count = max((tag.use_count or 0) - 1, 0)
-
-    resp.teacher_tags = body.tags
-    resp.teacher_note = body.note
-    resp.teacher_reviewed = True
-    resp.teacher_rating = body.rating or ""
-    resp.processing_status = "processed"
-
-    # Tags newly selected by teacher → find-or-create + increment use_count
-    _sync_tags_to_library(db, course_id, list(new_tags - old_tags), source="teacher")
+    apply_teacher_review(
+        db,
+        resp,
+        dimension_scores=body.dimension_scores,
+        confidence_override=body.confidence_override,
+        tags=body.tags,
+        note=body.note,
+        rating=body.rating or "",
+    )
 
     db.commit()
     db.refresh(resp)
@@ -980,7 +921,7 @@ async def assess_one_response(rid: int, background_tasks: BackgroundTasks, db: S
         resp.ai_suggested_tags = result.get("suggested_tags", [])
         new_tags = result.get("suggested_tags", [])
         if new_tags:
-            _sync_tags_to_library(db, topic.course_id, new_tags, source="ai")
+            sync_tags_to_library(db, topic.course_id, new_tags, source="ai")
         # assess_combined swallows LLM errors into a failure dict (no scores).
         # Keep the response retryable instead of masking it as "processed".
         resp.processing_status = "processed" if result.get("dimension_scores") else "submitted"
@@ -1252,10 +1193,11 @@ async def generate_comment(cid: int, body: CommentRequest, db: Session = Depends
         f"你是一位经验丰富的思辨课教师，正在为{student.name}同学（{tier_labels.get(student.cognitive_tier, '')}）撰写期末评语。\n\n"
         f"以下是{student.name}在各辩题中的表现数据和你的批改记录：\n\n"
         + "\n\n".join(topic_summaries)
-        + "\n\n请撰写一段150-250字的个性化评语，要求：\n"
+        + "\n\n" + COMMENT_TONE_GUIDE
+        + "\n请撰写一段150-250字的个性化评语，要求：\n"
         "1. 用温暖但专业的语气，直接对学生说话（用'你'而非'该生'）\n"
         "2. 具体引用教师选用的标签和批注中的观察（这些是你的第一手判断，优先使用）\n"
-        "3. 先肯定亮点（结合具体辩题表现），再指出1-2个提升方向\n"
+        "3. 先肯定亮点（结合具体辩题表现），再给出1-2个'可以更…'式的成长方向\n"
         "4. 给出一个具体的下一步建议\n"
         "5. 不要用模板化的开头（如'在本次课程中'），直接进入个性化内容\n"
         "6. 不要列出所有维度的分数，而是用自然语言描述表现\n"
@@ -1300,7 +1242,19 @@ def _fallback_comment(student, topic_data, dim_labels):
     if all_notes:
         parts.append(f"教师特别提到：{all_notes[0]}")
 
-    parts.append("建议下一步继续加强论证中对具体证据的使用，并尝试从不同角度看问题。")
+    if student.cognitive_tier == "basic":
+        parts.append(
+            "接下来可以试着把想法大声说完整，比如用“因为…所以…”把理由讲给老师和同学听。"
+        )
+    elif student.cognitive_tier == "advancing":
+        parts.append(
+            "接下来可以挑战更难的辩题：先说出自己的理由，再想想对方可能会怎么说，然后试着回应对方。"
+        )
+    else:
+        parts.append(
+            "接下来可以试着在表达观点时多举一个具体的例子，让理由更有画面感；"
+            "也可以听听不同角度的想法，看看有没有新的可能。"
+        )
 
     return "\n\n".join(parts)
 
@@ -1317,8 +1271,11 @@ def save_comment_draft(cid: int, body: CommentSaveRequest, db: Session = Depends
 
 
 @app.post("/api/courses/{cid}/comments/send", response_model=CommentSendOut)
-def send_comment(cid: int, body: CommentSendRequest, db: Session = Depends(get_db)):
-    """Save a final draft and mark it ready for the later robot delivery step."""
+async def send_comment(
+    cid: int, body: CommentSendRequest, db: Session = Depends(get_db)
+):
+    """Save the final comment and, when Feishu credentials are ready, push an
+    interactive confirmation card to the teacher via the bot."""
     student = db.query(Student).get(body.student_id)
     if not student or student.course_id != cid:
         raise HTTPException(404, "Student not found")
@@ -1326,12 +1283,88 @@ def send_comment(cid: int, body: CommentSendRequest, db: Session = Depends(get_d
         raise HTTPException(400, "Comment draft is empty")
     student.comment_draft = body.draft.strip()
     db.commit()
+
+    status = "saved_pending_delivery"
+    message = "评语已保存并标记待发送。"
+
+    config = feishu_client.config
+    if config.is_configured and config.teacher_open_id:
+        try:
+            # Pick the latest teacher-reviewed response for the card context.
+            main_resp = next(
+                (
+                    r
+                    for r in sorted(
+                        student.responses, key=lambda r: r.id, reverse=True
+                    )
+                    if r.teacher_reviewed
+                ),
+                None,
+            )
+            card = BotService.build_comment_card(
+                title=f"思辨星 · {student.name} 评语确认",
+                content=_build_comment_card_content(student, main_resp, body.draft),
+                course_id=cid,
+                student_id=student.id,
+                response_id=main_resp.id if main_resp else 0,
+                change_url=f"{config.web_base_url}/?tab=comments",
+            )
+            await BotService(feishu_client).send_card(config.teacher_open_id, card)
+            status = "delivered"
+            message = (
+                "评语已保存，并已通过飞书机器人推送评语卡片；"
+                "在飞书中点击卡片按钮即可确认评分或发送。"
+            )
+        except Exception as exc:
+            message = (
+                f"评语已保存；飞书机器人推送暂不可用（{exc}），"
+                "已保留待重试。"
+            )
+    else:
+        message = (
+            "评语已保存并标记待发送；飞书机器人发送通道待联调"
+            "（未配置 FEISHU_TEACHER_OPEN_ID），评语不会丢失。"
+        )
     return CommentSendOut(
         ok=True,
         student_id=body.student_id,
-        status="saved_pending_delivery",
-        message="评语已保存并标记待发送；飞书机器人发送通道将在后续联调中接入。",
+        status=status,
+        message=message,
     )
+
+
+def _build_comment_card_content(student, response, draft: str) -> str:
+    """Markdown body for the Feishu comment card."""
+    dim_labels = {
+        "clarity": "清晰性",
+        "interpretation": "解释力",
+        "evidence_awareness": "证据意识",
+        "relevance": "相关性",
+        "inference": "因果推理",
+        "evidence_use": "证据使用",
+        "argument_evaluation": "论证质量",
+        "depth_breadth": "深度广度",
+        "self_regulation": "反思调节",
+    }
+    lines = [f"**学生**：{student.name}（{student.cognitive_tier}）"]
+    if response is not None and response.topic:
+        lines.append(f"**辩题**：{response.topic.title}")
+    lines.append("")
+    lines.append(f"**评语**\n{draft}")
+    if response is not None:
+        scores = response.teacher_dimension_scores or response.ai_dimension_scores
+        if scores:
+            score_parts = [
+                f"{dim_labels.get(dim, dim)}：{rating}"
+                for dim, rating in scores.items()
+            ]
+            lines.append(f"\n**评分摘要**：{'、'.join(score_parts)}")
+        tags = response.teacher_tags or response.ai_suggested_tags or []
+        if tags:
+            lines.append(f"**亮点标签**：{'、'.join(tags)}")
+        if response.teacher_note:
+            lines.append(f"**教师备注**：{response.teacher_note}")
+    return "\n".join(lines)
 
 
 @app.post("/api/courses/{cid}/comments/batch", response_model=BatchCommentOut)

@@ -25,6 +25,14 @@ CLEANING_SYSTEM_PROMPT = (
     '如果原始文本已经完全规范，直接原样返回。'
 )
 
+COMMENT_TONE_GUIDE = (
+    '【评语口径·正反馈原则】\n'
+    '- 语气温暖而专业，直接对学生说话（用“你”而非“该生”）。\n'
+    '- 先具体肯定亮点（结合真实表现），再给 1-2 个“可以更…”式的成长方向；\n'
+    '  避免“不足”“缺乏”“较差”等否定表述，不评判学生个人。\n'
+    '- 每个成长方向后附一个具体、可执行的下一步动作，让学生知道明天可以怎么做。\n'
+)
+
 
 class AssessmentEngine:
     """Multi-dimensional critical thinking assessment with cognitive gradient support."""

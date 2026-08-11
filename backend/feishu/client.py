@@ -81,6 +81,10 @@ class FeishuConfig:
         self.verification_token = os.getenv("FEISHU_VERIFICATION_TOKEN", "")
         self.encrypt_key = os.getenv("FEISHU_ENCRYPT_KEY", "")
         self.teacher_open_id = os.getenv("FEISHU_TEACHER_OPEN_ID", "")
+        # Web app base URL for card jump buttons (no callback needed).
+        self.web_base_url = os.getenv(
+            "FEISHU_WEB_BASE_URL", "http://127.0.0.1:8000"
+        ).rstrip("/")
 
     @property
     def is_configured(self) -> bool:

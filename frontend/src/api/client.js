@@ -137,4 +137,19 @@ export const deleteTag = (...a) => _isDemo ? _demo.deleteTag(...a) : api.delete(
 export const getCalibrations = (...a) => _isDemo ? _demo.getCalibrations(...a) :
   api.get(`/courses/${a[0]}/calibrations`).then(r => r.data);
 
+// ── Feishu Bitable (多维表格同步) ───────────────────────
+export const getFeishuBitableStatus = () => _isDemo
+  ? Promise.resolve({
+      mode: 'deferred',
+      configured: false,
+      app_token: '',
+      table_ids: {},
+      bindings: {},
+      message: '演示模式：飞书多维表格状态仅在真实后端可见',
+    })
+  : api.get('/feishu/bitable/status').then(r => r.data);
+export const syncFeishuBitable = (courseId) => _isDemo
+  ? Promise.resolve({ status: 'ok', synced: 0, skipped: 0, errors: [] })
+  : api.post('/feishu/bitable/sync', { course_id: courseId }).then(r => r.data);
+
 export default api;
