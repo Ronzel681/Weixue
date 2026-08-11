@@ -66,7 +66,7 @@ AI 评估不应该"忘掉"教师的修正偏好。每当教师在批改页覆盖
 | 后端 | FastAPI + Uvicorn + SQLAlchemy |
 | 数据库 | SQLite |
 | LLM | OpenAI SDK（兼容 DashScope / DeepSeek / OpenAI） |
-| ASR | 可插拔（mock / qwen_asr / OpenAI / DashScope），详见 [音频录入与转写.md](./音频录入与转写.md) |
+| ASR | 可插拔（mock / qwen_asr / OpenAI / DashScope），详见 [docs/音频录入与转写.md](./docs/音频录入与转写.md) |
 | 前端 | React 18 + Vite + Zustand + Tailwind CSS |
 | 部署 | GitHub Pages（纯前端 demo 模式）/ FastAPI + 前端静态托管 |
 
@@ -80,6 +80,8 @@ Weixue/
 │   ├── schemas.py             # Pydantic 请求/响应模型
 │   ├── seed.py                # 演示数据填充
 │   ├── asr.py                 # 音频转写抽象层（mock / qwen_asr / openai / dashscope）
+│   ├── audio_utils.py         # 音频预处理（ffmpeg 转 16k 单声道 WAV / 示例音频生成）
+│   ├── tests/                 # 自动化测试（ASR 导入生命周期 / 批量评估流程 / 多维表格同步）
 │   ├── grading/
 │   │   ├── evaluator.py       # 双层流水线（Layer1 文本清洗 + Layer2 维度评估）
 │   │   ├── rubric_loader.py   # Rubric 模板加载 + prompt 组装 + 校准注入
@@ -97,8 +99,10 @@ Weixue/
 │   │   ├── pages/             # 管理大页（辩题/学生/录音）+ 功能页面
 │   │   └── stores/            # Zustand 状态管理
 │   └── package.json
-├── 飞书集成技术方案.md        # 飞书集成设计与实施路线
-├── 音频录入与转写.md          # 音频录入与转写技术文档
+├── docs/
+│   ├── 飞书集成技术方案.md    # 飞书集成设计与实施路线
+│   ├── 音频录入与转写.md      # 音频录入与转写技术文档
+│   └── 技术实现章节素材.md    # 参赛方案"技术实现"章节素材（供统稿）
 ├── 团队分工与时间线.md        # 团队任务分工与倒排期
 ├── papers/                    # 核心参考文献
 │   ├── Kuhn_1999_*.pdf        # 认识论发展阶段模型
@@ -189,7 +193,7 @@ python export_demo.py
 ```bash
 cd frontend
 npm install -D gh-pages
-npx cross-env VITE_DEMO_MODE=true VITE_BASE_PATH=/weixue/ npx vite build
+npx cross-env VITE_DEMO_MODE=true VITE_BASE_PATH=/Weixue/ npx vite build
 npx gh-pages -d dist
 ```
 
