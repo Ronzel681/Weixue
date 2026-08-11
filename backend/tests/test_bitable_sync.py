@@ -137,11 +137,12 @@ class RecordBuilderTests(unittest.TestCase):
     def test_response_record_status_and_multi_select(self):
         response = SimpleNamespace(
             teacher_reviewed=True,
-            ai_dimension_scores={"clarity": "A", "relevance": "B+"},
+            ai_dimension_scores={"position": "A", "material": "A-", "structure": "B+", "language": "A-", "perspective": "B+"},
             ai_confidence="certain_good",
-            ai_suggested_tags=["因果推理", "证据意识"],
-            teacher_dimension_scores={"clarity": "A"},
-            teacher_tags=["证据意识"],
+            ai_suggested_tags=["结构清晰", "选材具体"],
+            ai_bonus_flags=["有新意"],
+            teacher_dimension_scores={"position": "A"},
+            teacher_tags=["选材具体"],
             teacher_note="表达流畅",
             raw_text="原文",
             cleaned_text="清洗稿",
@@ -154,8 +155,9 @@ class RecordBuilderTests(unittest.TestCase):
         self.assertEqual(fields["来源"], "音频转写")
         self.assertEqual(fields["AI置信度"], "高")
         self.assertEqual(fields["状态"], "教师已审")
-        self.assertEqual(fields["AI建议标签"], ["因果推理", "证据意识"])
-        self.assertIn("clarity:A", fields["AI评分摘要"])
+        self.assertEqual(fields["AI建议标签"], ["结构清晰", "选材具体"])
+        self.assertEqual(fields["加分项"], ["有新意"])
+        self.assertIn("立意:A", fields["AI评分摘要"])
 
 
 class BitableSyncTests(unittest.IsolatedAsyncioTestCase):
@@ -188,11 +190,11 @@ class BitableSyncTests(unittest.IsolatedAsyncioTestCase):
             raw_text="我觉得应该放回野外。",
             cleaned_text="我觉得应该放回野外。",
             source="manual",
-            ai_dimension_scores={"clarity": "A"},
+            ai_dimension_scores={"position": "A"},
             ai_confidence="uncertain",
-            ai_suggested_tags=["因果推理"],
+            ai_suggested_tags=["结构清晰"],
             teacher_reviewed=True,
-            teacher_dimension_scores={"clarity": "A"},
+            teacher_dimension_scores={"position": "A"},
         )
         db.add(response)
         db.commit()

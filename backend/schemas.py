@@ -85,7 +85,7 @@ class StudentOut(StudentBase):
 
 class DimensionScore(BaseModel):
     """Single dimension evaluation result."""
-    dimension: str          # e.g. "clarity", "relevance"
+    dimension: str          # e.g. "position", "material"（五维度：立意/选材/结构/语言/视角）
     rating: str             # A+/A/A-/B+/B/B-
     evidence: str = ""      # text evidence from student response
     reasoning: str = ""     # why this rating was given
@@ -93,10 +93,11 @@ class DimensionScore(BaseModel):
 class AssessmentResult(BaseModel):
     """Full AI assessment result for one response."""
     dimension_scores: dict[str, str] = Field(default_factory=dict)
-    # {"clarity": "B", "relevance": "A", ...}
+    # {"position": "A", "material": "B+", "structure": "B", "language": "A-", "perspective": "B+"}
     confidence: str = "uncertain"
     reasoning: dict = Field(default_factory=dict)
     extracted_features: dict = Field(default_factory=dict)
+    bonus_flags: list[str] = Field(default_factory=list)
     note: str = ""
     suggested_tags: list[str] = Field(default_factory=list)
 
@@ -117,8 +118,10 @@ class StudentResponseOut(BaseModel):
     ai_confidence: str = "uncertain"
     ai_reasoning: dict = Field(default_factory=dict)
     ai_extracted_features: dict = Field(default_factory=dict)
+    ai_bonus_flags: list = Field(default_factory=list)
     ai_note: str = ""
     ai_suggested_tags: list = Field(default_factory=list)
+    dialogue_finished: Optional[str] = None
 
     teacher_dimension_scores: Optional[dict] = None
     teacher_confidence_override: Optional[str] = None
@@ -259,7 +262,7 @@ class TopicAnalytics(BaseModel):
     topic_type: str
     cognitive_tier: str
     avg_dimension_scores: dict[str, float] = Field(default_factory=dict)
-    # {"clarity": 0.75, "relevance": 0.62, ...}
+    # {"position": 0.75, "material": 0.62, ...}
     weak_dimensions: list[str] = Field(default_factory=list)
     low_students: list[str] = Field(default_factory=list)
     error_tags: list[dict] = Field(default_factory=list)

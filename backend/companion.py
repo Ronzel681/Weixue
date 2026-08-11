@@ -39,23 +39,35 @@ FALLBACK_QUESTIONS = [
 
 
 def build_dialogue_block(turns) -> str:
-    """Render companion turns as a compact multi-round dialogue record."""
+    """Render companion turns as a round-structured dialogue record.
+
+    按“学生作答轮次”编号，而不是按消息条数：初始作答（第1轮）→ 追问 →
+    第2轮补充 → 追问 …，让评估器能区分初始表达与追问后的提升。
+    """
     if not turns:
         return ""
     role_label = {
         "student": "学生",
-        "ai_suggestion": "AI追问建议",
+        "ai_suggestion": "AI追问",
         "teacher": "教师追问",
     }
-    lines = ["【多轮对话记录】"]
-    for i, t in enumerate(turns, 1):
-        label = role_label.get(getattr(t, "role", ""), getattr(t, "role", ""))
-        content = getattr(t, "content", "")
-        if not content or not str(content).strip():
+    lines = ["【多轮对话记录（按作答轮次）】"]
+    round_no = 0
+    for t in turns:
+        role = getattr(t, "role", "")
+        content = str(getattr(t, "content", "") or "").strip()
+        if not content:
             continue
         turn_type = getattr(t, "turn_type", "") or ""
-        prefix = f"第{i}轮 [{label}]" + ("（疑似复述）" if turn_type == "echo_risk" else "")
-        lines.append(f"{prefix}：{str(content).strip()}")
+        if role == "student":
+            round_no += 1
+            prefix = f"初始作答（第1轮·学生）" if round_no == 1 else f"第{round_no}轮·学生补充"
+        else:
+            label = role_label.get(role, role)
+            prefix = f"第{round_no}轮后·{label}" if round_no > 0 else f"{label}"
+        if turn_type == "echo_risk":
+            prefix += "（疑似复述）"
+        lines.append(f"{prefix}：{content}")
     return "\n".join(lines)
 
 

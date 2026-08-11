@@ -83,9 +83,15 @@ export const appendTurn = (rid, data) => _isDemo
 export const getDialogue = (rid) => _isDemo
   ? _demo.getDialogue(rid)
   : api.get(`/companion/${rid}`).then(r => r.data);
+export const flashFeedback = (rid) => _isDemo
+  ? _demo.flashFeedback(rid)
+  : api.post(`/companion/${rid}/feedback`).then(r => r.data);
 export const updateResponseStatus = (rid, status) => _isDemo
   ? _demo.updateResponseStatus(rid, status)
   : api.patch(`/responses/${rid}/status`, { status }).then(r => r.data);
+export const finishDialogue = (rid, by) => _isDemo
+  ? _demo.finishDialogue(rid, by)
+  : api.post(`/responses/${rid}/dialogue-finish`, { by }).then(r => r.data);
 export const assessOne = (rid) => _isDemo
   ? _demo.assessOne(rid)
   : api.post(`/responses/${rid}/assess`).then(r => r.data);

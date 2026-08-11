@@ -3,9 +3,20 @@ import useStore from '../stores/gradingStore';
 import { computePrepAnalytics } from '../utils/analytics';
 
 const DIM_LABELS = {
-  clarity: '清晰性', interpretation: '解释力', evidence_awareness: '证据意识',
-  relevance: '相关性', inference: '因果推理', evidence_use: '证据使用',
-  argument_evaluation: '论证质量', depth_breadth: '深度广度', self_regulation: '反思调节',
+  position: '立意（观点鲜明）', material: '选材（言之有物）',
+  structure: '结构（条理清晰）', language: '语言（用词准确）',
+  perspective: '视角（换位思考）',
+  // 旧数据兼容：老维度 key 也统一显示为五维度
+  clarity: '立意（观点鲜明）', interpretation: '立意（观点鲜明）',
+  evidence_awareness: '选材（言之有物）', evidence_use: '选材（言之有物）',
+  relevance: '结构（条理清晰）', inference: '结构（条理清晰）',
+  argument_evaluation: '结构（条理清晰）', depth_breadth: '视角（换位思考）',
+  self_regulation: '视角（换位思考）',
+  清晰性: '立意（观点鲜明）', 解释力: '立意（观点鲜明）',
+  证据意识: '选材（言之有物）', 证据使用: '选材（言之有物）',
+  相关性: '结构（条理清晰）', 因果推理: '结构（条理清晰）',
+  论证质量: '结构（条理清晰）', 深度广度: '视角（换位思考）',
+  反思调节: '视角（换位思考）',
 };
 
 const dimColor = (val) => {

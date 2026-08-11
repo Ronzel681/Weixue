@@ -119,20 +119,23 @@ class StudentResponse(Base):
 
     # AI multi-dimensional assessment
     ai_dimension_scores = Column(JSON, nullable=True)
-    # e.g. {"clarity": "B", "relevance": "A", "inference": "C"}
+    # e.g. {"position": "A", "material": "B+", "structure": "B", "language": "A-", "perspective": "B+"}
 
     ai_confidence = Column(String(20), default="uncertain")
     # certain_good / certain_weak / uncertain
 
     ai_reasoning = Column(JSON, default=dict)
     # per-dimension reasoning chain:
-    # {"clarity": {"evidence": "...", "reasoning": "...", "rating": "B"}, ...}
+    # {"position": {"evidence": "...", "reasoning": "...", "rating": "A"}, ...}
 
     ai_extracted_features = Column(JSON, default=dict)
     # {"arguments_count": 2, "counter_arguments": 0, "causal_connectors": ["因为","所以"], ...}
 
     ai_note = Column(Text, default="")
     ai_suggested_tags = Column(JSON, default=list)
+    ai_bonus_flags = Column(JSON, default=list)
+    # 对话生命周期：None=进行中；'student'/'teacher'=任一方主动结束；'auto'=答满 3 轮自动结束
+    dialogue_finished = Column(String(20), nullable=True)
 
     # Teacher override (per-dimension)
     teacher_dimension_scores = Column(JSON, nullable=True)
@@ -194,16 +197,16 @@ class RubricTemplate(Base):
     # e.g. "1-2", "3-5", "6-7"
 
     active_dimensions = Column(JSON, nullable=False)
-    # ["clarity", "interpretation", "evidence_awareness"]
+    # ["position", "material", "structure", "language", "perspective"]
 
     dimension_weights = Column(JSON, nullable=False)
-    # {"clarity": 0.4, "interpretation": 0.35, "evidence_awareness": 0.25}
+    # {"position": 0.2, "material": 0.2, "structure": 0.2, "language": 0.2, "perspective": 0.2}
 
     rubric_definitions = Column(JSON, nullable=False)
-    # {"clarity": {"name": "清晰性", "description": "...", "levels": {"A": "...", "B": "...", ...}}, ...}
+    # {"position": {"name": "立意（观点鲜明）", "description": "...", "levels": {"A": "...", ...}}, ...}
 
     negative_indicators = Column(JSON, nullable=False)
-    # {"clarity": "无法理解学生在说什么，完全无法提取观点", ...}
+    # {"position": "无法辨识核心观点", ...}
 
     prompt_template = Column(Text, nullable=False)
     # LLM system prompt template for this tier
@@ -225,13 +228,13 @@ class CalibrationRecord(Base):
     teacher_id = Column(String(50), default="default")
 
     ai_original_scores = Column(JSON, nullable=False)
-    # {"clarity": "B", "relevance": "A", ...}
+    # {"position": "A", "material": "B+", ...}
 
     teacher_final_scores = Column(JSON, nullable=False)
-    # {"clarity": "B", "relevance": "A+", ...}
+    # {"position": "A", "material": "A", ...}
 
     modifications = Column(JSON, default=list)
-    # [{"dimension": "relevance", "from": "B", "to": "A", "reason": "..."}, ...]
+    # [{"dimension": "material", "from": "B+", "to": "A", "reason": "..."}, ...]
 
     note = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)

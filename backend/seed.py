@@ -31,64 +31,92 @@ EL = '\u2026'  # horizontal ellipsis
 # RUBRIC TEMPLATES
 # ══════════════════════════════════════════════════════════════
 
+# ── 五维度核心标准（企业口径，2026-08-11 确认）──────────────────────────
+# 立意 / 选材 / 结构 / 语言 / 视角 为唯一核心评判标准：同一套标准 + 年级合格线；
+# 明确不评：流利度、好词好句、引经据典；加分项“有自己 / 有新意”命中可升级评级。
+FIVE_DIMENSIONS = ['position', 'material', 'structure', 'language', 'perspective']
+
+FIVE_DIM_EQUAL_WEIGHTS = {d: 0.2 for d in FIVE_DIMENSIONS}
+
+FIVE_DIM_DEFINITIONS = {
+    'position': {
+        'name': '立意（观点鲜明）',
+        'description': '学生是否清楚表达了自己的核心看法，态度不模糊；低年级重点看“敢说、说清楚”。',
+        'levels': {
+            'A+': '观点鲜明、表达完整，有明确的立场和限定条件，远超同龄人清晰度',
+            'A': '能清楚完整地表达自己的核心观点，态度不模糊',
+            'A-': '观点基本清楚，个别表述不够精确',
+            'B+': '能说出自己的想法，但表达不够完整或立场略有摇摆',
+            'B': '观点模糊，需要较多推断才能理解，或前后自相矛盾',
+            'B-': '无法辨识核心观点（不敢说、说不清、无意义重复）',
+        },
+    },
+    'material': {
+        'name': '选材（言之有物）',
+        'description': '学生是否用具体事实、例子或材料信息支撑观点，内容不空洞。',
+        'levels': {
+            'A+': '提供多个具体、相关的证据或例子，并清楚说明其与观点的关系',
+            'A': '提供至少一个具体、相关的证据或例子支撑观点',
+            'A-': '有使用证据的意识，但证据不够具体或与观点关联较弱',
+            'B+': '能引用材料信息或生活例子，但多为笼统表述',
+            'B': '只有断言和笼统理由，没有具体事实或例子支撑',
+            'B-': '没有任何支撑，全是主观空泛断言',
+        },
+    },
+    'structure': {
+        'name': '结构（条理清晰）',
+        'description': '表达顺序是否合理，前后逻辑是否关联紧密；只看底层逻辑，不评辞藻。',
+        'levels': {
+            'A+': '论证链条完整严密：观点→理由→例子→小结层层递进，并能回应反面观点',
+            'A': '结构清晰：观点、理由、例子衔接合理，逻辑连贯',
+            'A-': '结构基本清晰，偶有逻辑跳跃但能自行拉回',
+            'B+': '有先后顺序意识，但逻辑衔接不够紧密',
+            'B': '东拉西扯，前后观点不连贯或自相矛盾',
+            'B-': '完全碎片化，没有任何可辨识的逻辑结构',
+        },
+    },
+    'language': {
+        'name': '语言（用词准确）',
+        'description': '用词是否符合语境、能否准确传达意思；只评“用词准确”，不评文采、好词好句、流利度。',
+        'levels': {
+            'A+': '用词精准、符合语境，能准确传达细微含义',
+            'A': '用词准确、符合语境，意思传达清楚',
+            'A-': '用词基本准确，个别词不达意但不影响理解',
+            'B+': '部分用词不准确，需结合上下文推断',
+            'B': '用词明显不当，影响意思理解',
+            'B-': '用词混乱，无法理解学生想表达什么',
+        },
+    },
+    'perspective': {
+        'name': '视角（换位思考）',
+        'description': '是否顾及他人感受、从多角度权衡，而不只是单一立场。',
+        'levels': {
+            'A+': '呈现多方立场并识别核心矛盾，提出有整合性的见解',
+            'A': '能从至少两个角度思考，并尝试权衡不同立场',
+            'A-': '能意识到还有其他角度，但权衡较浅',
+            'B+': '提到其他可能性，但很快回到单一立场',
+            'B': '只从单一视角论述，未考虑他人立场',
+            'B-': '完全以自我为中心，无任何换位思考痕迹',
+        },
+    },
+}
+
+FIVE_DIM_NEGATIVES = {
+    'position': '学生发言完全是无意义的重复或乱码，或始终不敢说出自己的想法',
+    'material': '所有“事实”都是凭空编造或空泛断言（如“大家都知道”），无任何具体例子支撑',
+    'structure': '论述东拉西扯、前后矛盾，或完全碎片化没有逻辑顺序',
+    'language': '用词混乱、词不达意（注意：不因口语化、重复、不流畅而扣分）',
+    'perspective': '从头到尾只有单一角度，完全不顾及他人感受或反面观点',
+}
+
 RUBRIC_TEMPLATES = [
     {
         'cognitive_tier': 'basic',
         'grade_range': '1-2',
-        'active_dimensions': ['clarity', 'interpretation', 'evidence_awareness'],
-        'dimension_weights': {
-            'clarity': 0.4,
-            'interpretation': 0.35,
-            'evidence_awareness': 0.25,
-        },
-        'rubric_definitions': {
-            'clarity': {
-                'name': '清晰性',
-                'description': '学生能否用完整的句子表达自己的主观感受或想法，而非仅用单个词语或无意义的重复。',
-                'levels': {
-                    'A+': '能用完整、通顺、丰富的句子清楚地说出自己的感受或想法，表达有细节',
-                    'A': '能用完整、通顺的句子清楚地说出自己的感受或想法',
-                    'A-': '句子基本完整通顺，意思清楚但表达稍显简单',
-                    'B+': '句子基本完整，能大致理解学生想表达什么',
-                    'B': '表达碎片化，需要较多猜测才能理解意思',
-                    'B-': '无法理解学生在说什么，完全没有可提取的观点',
-                },
-            },
-            'interpretation': {
-                'name': '解释力',
-                'description': f'学生能否对自己提到的人、事、物做出简单的描述或解释，比如{LQ}因为{EL}{EL}所以{EL}{EL}{RQ}。',
-                'levels': {
-                    'A+': f'能用{LQ}因为{RQ}{LQ}所以{RQ}等连接词清楚、完整地解释自己的想法',
-                    'A': f'能用{LQ}因为{RQ}{LQ}所以{RQ}等连接词解释自己的想法',
-                    'A-': '有较完整的解释意图，连接词使用基本到位',
-                    'B+': '有简单的解释意图，但连接词使用不完整',
-                    'B': f'只有断言没有解释，如{LQ}我觉得就是这样{RQ}',
-                    'B-': '完全没有解释意图，仅重复问题或给出无关联内容',
-                },
-            },
-            'evidence_awareness': {
-                'name': '证据意识',
-                'description': (
-                    '学生能否区分"材料告诉我的"和"我自己想的"。'
-                    '基于Kuhn(1999) Absolutist阶段特征：此年龄段儿童倾向于将知识视为现实的直接反映，'
-                    '尚不能稳定区分"从材料中看到的信息"与"自己的想象或推测"。'
-                    '本维度评估的是这种区分能力的萌芽。'
-                ),
-                'levels': {
-                    'A+': '能清楚地区分材料中的信息（如"故事里说老鹰受伤了"）和自己的想象或推测（如"我觉得它会害怕"），并能指出信息来源',
-                    'A': '能较清楚地区分材料信息和自己的想法，基本不混淆',
-                    'A-': '有区分意识和尝试，但偶尔会把推测当作材料中的事实',
-                    'B+': '有时能引用材料信息，但经常将想象混入其中',
-                    'B': '完全依赖自己的想象或感受，未尝试引用材料中的信息',
-                    'B-': '没有任何区分"材料说的"和"我想的"的意识，所有内容都是主观断言',
-                },
-            },
-        },
-        'negative_indicators': {
-            'clarity': '学生发言完全是无意义的重复或乱码，没有任何可辨识的观点',
-            'interpretation': '学生仅重复问题原话或他人发言，无任何自己的解释',
-            'evidence_awareness': f'学生所有{LQ}事实{RQ}都是凭空编造的，完全没有参考材料中的任何信息',
-        },
+        'active_dimensions': FIVE_DIMENSIONS,
+        'dimension_weights': dict(FIVE_DIM_EQUAL_WEIGHTS),
+        'rubric_definitions': dict(FIVE_DIM_DEFINITIONS),
+        'negative_indicators': dict(FIVE_DIM_NEGATIVES),
         'prompt_template': (
             '你是一位温暖、有耐心的一二年级思辨课教师，正在评估一位低年级学生的课堂发言。\n\n'
             '【理论基础】\n'
@@ -100,6 +128,7 @@ RUBRIC_TEMPLATES = [
             '- 请宽容对待错别字和语法不规范\n'
             '- 绝对不要因为学生缺乏逻辑推理、因果分析或论证深度而扣分——这些能力在此年龄段尚未发展\n'
             f'- 重点关注学生是否{LQ}说出了自己的想法{RQ}，而非想法是否{LQ}正确{RQ}\n'
+            '- 企业口径（唯一核心标准）：五维度（立意/选材/结构/语言/视角）；本年级合格线是"敢说、说清楚"——观点表达完整即可视为达标，不因缺乏深度论证而扣分\n'
             '- 评语风格：温暖鼓励型，使用具体行为描述（如{LQ}你说出了自己最喜欢的动物{RQ}），避免抽象评价\n\n'
             '【评分严格性校准】\n'
             '- 评级采用六级制：A+/A/A-/B+/B/B-，其中A+仅授予真正卓越、超出年龄预期的表现\n'
@@ -114,84 +143,22 @@ RUBRIC_TEMPLATES = [
             '  "dimension_scores": {"维度名": "A+/A/A-/B+/B/B-"},\n'
             '  "reasoning": {"维度名": {"evidence": "原文引用", "reasoning": "评级理由"}},\n'
             '  "extracted_features": {"arguments_count": 数量, "used_because": true/false},\n'
+            '  "bonus_flags": ["有自己"]或["有新意"]或["有自己","有新意"]，未命中给[],\n'
             '  "confidence": "certain_good/certain_weak/uncertain",\n'
             '  "note": "给教师的简要说明",\n'
             '  "suggested_tags": ["标签1", "标签2"]\n'
-            '}\n\n'
+            '}\n'
+            '（严格 JSON：只输出一个 JSON 对象，不要 Markdown 代码块；字符串内的换行请用 \\n 转义）\n\n'
             '{CALIBRATION_EXAMPLES}'
         ),
     },
     {
         'cognitive_tier': 'developing',
         'grade_range': '3-5',
-        'active_dimensions': ['clarity', 'relevance', 'inference', 'evidence_use'],
-        'dimension_weights': {
-            'clarity': 0.15,
-            'relevance': 0.25,
-            'inference': 0.25,
-            'evidence_use': 0.35,
-        },
-        'rubric_definitions': {
-            'clarity': {
-                'name': '清晰性',
-                'description': '学生的发言是否紧扣问题，用较为完整的句子表达观点。',
-                'levels': {
-                    'A+': '观点表达清晰、精确、结构完整，令人一目了然',
-                    'A': '观点表达清晰完整，容易理解',
-                    'A-': '观点表达基本清楚，个别表述不够精确',
-                    'B+': '观点基本清楚，但部分表述不够精确',
-                    'B': '观点模糊，需要较多推断才能理解',
-                    'B-': '无法辨识学生的核心观点',
-                },
-            },
-            'relevance': {
-                'name': '相关性',
-                'description': '学生的发言是否紧扣核心议题，没有明显跑题或离题。',
-                'levels': {
-                    'A+': '始终紧扣核心议题，每一句都服务于主题，论证集中',
-                    'A': '始终围绕核心议题展开，没有跑题',
-                    'A-': '大部分内容紧扣议题，极个别句子略有偏离但无伤大雅',
-                    'B+': '大部分内容相关，偶尔偏离但能自行拉回',
-                    'B': '部分内容跑题，需要他人引导才能回到主题',
-                    'B-': '完全跑题或答非所问',
-                },
-            },
-            'inference': {
-                'name': '因果推理',
-                'description': f'学生能否使用因果关联词（{LQ}如果{EL}{EL}那么{RQ}{LQ}因为{EL}{EL}所以{RQ}）完成简单的因果推理，而非仅给出断言。',
-                'levels': {
-                    'A+': '使用了清晰、有力的因果链条支撑观点，推理严密',
-                    'A': '使用了清晰的因果链条支撑自己的观点',
-                    'A-': '有较完整的因果推理，链条基本成立',
-                    'B+': '有因果推理的尝试，但链条不够完整或有力',
-                    'B': f'只有断言没有推理，如{LQ}我觉得就是这样{RQ}',
-                    'B-': '完全没有因果推理的痕迹',
-                },
-            },
-            'evidence_use': {
-                'name': '证据使用',
-                'description': (
-                    '学生是否使用了具体的证据来支撑自己的主张。'
-                    '参考McNeill(2011) CER框架：论证由Claim(主张)、Evidence(证据)、Reasoning(推理)组成。'
-                    '此年龄段学生正处于从"仅给出主张"到"能用证据支撑主张"的过渡期，'
-                    '证据的具体性和与主张的关联性是评估重点。'
-                ),
-                'levels': {
-                    'A+': '提供了2个以上具体、相关的证据（如具体事例、数据、材料中的信息），并清楚说明证据如何支撑自己的主张',
-                    'A': '提供了至少一个具体、相关的证据，并能说明证据与主张的关系',
-                    'A-': '提供了证据但不够具体或充分，与主张的关联性基本成立',
-                    'B+': '有使用证据的意识，但证据笼统（如"很多例子"）或与主张关联较弱',
-                    'B': '仅有主张和理由，没有具体证据支撑（如"因为这样就是对的"）',
-                    'B-': '完全没有使用证据的意识，全部是主观断言，无任何支撑意图',
-                },
-            },
-        },
-        'negative_indicators': {
-            'clarity': '学生发言全部是东拉西扯的碎片，无法辨识核心观点',
-            'relevance': '学生全程讨论与议题无关的内容（如讨论昨天吃的午饭）',
-            'inference': f'学生所有论述都是{LQ}我觉得{RQ}{LQ}我认为{RQ}式断言，无任何因果连接词',
-            'evidence_use': f'学生所有论述都是{LQ}因为就是这样{RQ}{LQ}大家都知道{RQ}式空泛断言，没有任何具体证据',
-        },
+        'active_dimensions': FIVE_DIMENSIONS,
+        'dimension_weights': dict(FIVE_DIM_EQUAL_WEIGHTS),
+        'rubric_definitions': dict(FIVE_DIM_DEFINITIONS),
+        'negative_indicators': dict(FIVE_DIM_NEGATIVES),
         'prompt_template': (
             '你是一位善于引导探索的三至五年级思辨课教师，正在评估一位中年级学生的课堂发言或习作。\n\n'
             '【理论基础】\n'
@@ -199,6 +166,7 @@ RUBRIC_TEMPLATES = [
             '- 此阶段学生已具备基本的因果推理能力，但尚不能进行抽象逻辑分析或识别论证中的隐藏假设\n\n'
             '【重要评估原则】\n'
             f'- 请重点关注学生是否{LQ}围绕主题展开讨论{RQ}和{LQ}是否给出了理由{RQ}\n'
+            '- 企业口径（唯一核心标准）：五维度（立意/选材/结构/语言/视角）；本年级合格线是"围绕主题给出具体理由"——理由充分、不跑题即可视为达标\n'
             '- 不要评测学生能否识别论证中的隐藏假设或进行元认知反思——这些是高年级能力\n'
             '- 适当宽容口语化表达和轻微跑题\n'
             f'- 评语风格：引导探索型，指出{LQ}你已经在做的好事{RQ}并暗示{LQ}下一步可以试试{EL}{EL}{RQ}\n\n'
@@ -215,101 +183,22 @@ RUBRIC_TEMPLATES = [
             '  "dimension_scores": {"维度名": "A+/A/A-/B+/B/B-"},\n'
             '  "reasoning": {"维度名": {"evidence": "原文引用", "reasoning": "评级理由"}},\n'
             '  "extracted_features": {"arguments_count": 数量, "causal_connectors": [], "off_topic_ratio": 0.0},\n'
+            '  "bonus_flags": ["有自己"]或["有新意"]或["有自己","有新意"]，未命中给[],\n'
             '  "confidence": "certain_good/certain_weak/uncertain",\n'
             '  "note": "给教师的简要说明",\n'
             '  "suggested_tags": ["标签1", "标签2"]\n'
-            '}\n\n'
+            '}\n'
+            '（严格 JSON：只输出一个 JSON 对象，不要 Markdown 代码块；字符串内的换行请用 \\n 转义）\n\n'
             '{CALIBRATION_EXAMPLES}'
         ),
     },
     {
         'cognitive_tier': 'advancing',
         'grade_range': '6-7',
-        'active_dimensions': ['clarity', 'relevance', 'argument_evaluation', 'depth_breadth', 'self_regulation'],
-        'dimension_weights': {
-            'clarity': 0.1,
-            'relevance': 0.2,
-            'argument_evaluation': 0.3,
-            'depth_breadth': 0.25,
-            'self_regulation': 0.15,
-        },
-        'rubric_definitions': {
-            'clarity': {
-                'name': '清晰性',
-                'description': '学生的核心论点是否表述精确，而非模糊笼统。',
-                'levels': {
-                    'A+': '论点精确具体，有明确的限定条件，语言凝练结构清晰',
-                    'A': '论点精确具体，有明确的限定条件',
-                    'A-': '论点清楚，限定条件略有不足但基本到位',
-                    'B+': '论点清楚但缺少限定或条件说明',
-                    'B': '论点较为笼统，需要追问才能明确',
-                    'B-': '无法辨识核心论点',
-                },
-            },
-            'relevance': {
-                'name': '相关性',
-                'description': '论述是否始终围绕核心议题，每一段论据都服务于核心论点。',
-                'levels': {
-                    'A+': '所有论据紧密紧扣议题，形成完整的论证链条，毫无冗余',
-                    'A': '所有论据紧扣议题，没有离题内容',
-                    'A-': '绝大部分论据紧扣议题，极个别偏离但影响不大',
-                    'B+': '大部分相关，个别论据与议题关联较弱',
-                    'B': '较多内容偏离议题',
-                    'B-': '主要论述与议题无关',
-                },
-            },
-            'argument_evaluation': {
-                'name': '论证评估',
-                'description': (
-                    '学生使用的论据是否有力、具体、可验证，以及是否展现了因果推理和反驳能力。'
-                    '参考McNeill(2011) CER框架（Claim-Evidence-Reasoning）和Osborne(2004)论证等级模型，'
-                    'rebuttal意识是区分高水平论证的关键指标：没有rebuttal的论证不得高于B+。'
-                ),
-                'levels': {
-                    'A+': '有明确主张(claim)、具体充分的证据(evidence)、严密的推理(reasoning)链条，并能预判和有力回应反驳',
-                    'A': '有明确主张和具体证据，展示了因果推理，并能预判或回应可能的反驳',
-                    'A-': '有明确主张和较有力的证据，有因果推理但反驳意识稍弱',
-                    'B+': '有因果推理尝试但未考虑反驳视角，或论据较充分但缺少对反面观点的回应',
-                    'B': f'论据空泛（如{LQ}大家都知道{RQ}），缺乏具体支撑，仅有主张和薄弱理由',
-                    'B-': '没有实质性论据，仅有断言，无claim-evidence-reasoning结构',
-                },
-            },
-            'depth_breadth': {
-                'name': '深度与广度',
-                'description': '学生是否考虑了多方立场、是否识别了问题的复杂性、是否触及了问题的根本矛盾。',
-                'levels': {
-                    'A+': '呈现了多方立场，识别了核心矛盾，并提出了创造性的整合见解',
-                    'A': '呈现了多方立场，识别了核心矛盾，并尝试提出整合性见解',
-                    'A-': '提到了多种视角，对矛盾有一定分析但整合不够深入',
-                    'B+': '提到了至少两种视角，但未深入分析其张力',
-                    'B': '仅从单一视角论述，未考虑其他立场',
-                    'B-': '论述极度单一且缺乏任何深度',
-                },
-            },
-            'self_regulation': {
-                'name': '反思调节',
-                'description': (
-                    '基于Kuhn(1999)的元战略控制(metastrategic control)概念：'
-                    '学生能否对自己的思维过程保持觉察，在不同情境下一致地应用评估标准，'
-                    '而非对自己偏好的论点网开一面。这是Evaluativist认识论的核心特征。'
-                ),
-                'levels': {
-                    'A+': '展示了成熟的元战略控制：能识别自身论证的薄弱环节，对不同立场一致地应用评估标准，展示开放的Evaluativist认识论',
-                    'A': '明确承认自身观点的局限性或条件，展示了思维的灵活性和一致性',
-                    'A-': '有一定的自我审视，愿意在特定条件下修正立场，但一致性不够稳定',
-                    'B+': '有自我审视的痕迹但不够明确，对反面论据有一定程度的接纳',
-                    'B': '完全坚持己见，对不同立场应用不一致的标准，体现Multiplist倾向（认为"所有观点都一样有道理"）',
-                    'B-': '拒绝承认任何反面论据的合理性，表现出认识论封闭',
-                },
-            },
-        },
-        'negative_indicators': {
-            'clarity': '学生通篇使用模棱两可的表述，始终没有明确立场',
-            'relevance': '论述完全围绕无关话题展开（如用个人经历代替逻辑论证）',
-            'argument_evaluation': f'所有{LQ}论据{RQ}都是{LQ}我觉得{RQ}{LQ}大家都知道{RQ}式的空泛断言，无任何具体事实或推理支撑',
-            'depth_breadth': '论述从头到尾只有一个角度的重复陈述，完全没有新信息或新视角',
-            'self_regulation': '学生在被提示对方论据后仍然完全拒绝考虑，表现出思维封闭',
-        },
+        'active_dimensions': FIVE_DIMENSIONS,
+        'dimension_weights': dict(FIVE_DIM_EQUAL_WEIGHTS),
+        'rubric_definitions': dict(FIVE_DIM_DEFINITIONS),
+        'negative_indicators': dict(FIVE_DIM_NEGATIVES),
         'prompt_template': (
             '你是一位学术导向的六至七年级思辨课教师，正在评估一位高年级学生的课堂发言或习作。\n\n'
             '【理论基础】\n'
@@ -318,6 +207,7 @@ RUBRIC_TEMPLATES = [
             '- 参考McNeill(2011) CER框架：论证由Claim(主张)、Evidence(证据)、Reasoning(推理)三部分组成\n\n'
             '【重要评估原则】\n'
             f'- 全面评估其论证质量：不仅看{LQ}有没有理由{RQ}，更要看{LQ}理由是否有力{RQ}{LQ}是否考虑了反面{RQ}{LQ}是否识别了矛盾{RQ}\n'
+            '- 企业口径（唯一核心标准）：五维度（立意/选材/结构/语言/视角）；本年级合格线是"逻辑论证严谨度"——理由充分、反驳有力即视为达标\n'
             '- 使用苏格拉底式追问的评语风格：肯定其亮点的同时，用反问引导学生思考更深层的问题\n'
             '- 对篇幅长但内容空洞的作答，不要因为字数多而给高分\n'
             '- 对篇幅短但角度独特的作答，应识别其思维独创性\n\n'
@@ -328,7 +218,7 @@ RUBRIC_TEMPLATES = [
             '- B+/B是大多数学生的合理区间，代表{LQ}有基本的论证意识但深度不足{RQ}\n'
             '- B-仅用于论述完全缺乏实质内容或思维封闭的情况\n'
             '- 特别注意：篇幅长≠质量好，空泛的断言式长文应得B甚至B-\n'
-            '- 反驳硬门槛：如果学生完全没有考虑反面观点或替代解释，argument_evaluation不得高于B+。这是Kuhn从Multiplist向Evaluativist过渡的核心指标\n\n'
+            '- 反驳硬门槛：如果学生完全没有考虑反面观点或替代解释，"结构"与"视角"不得高于B+\n\n'
             '{DIMENSION_DEFINITIONS}\n'
             '{NEGATIVE_INDICATORS}\n\n'
             '【输出格式】请严格按以下 JSON 格式返回评估结果：\n'
@@ -336,10 +226,12 @@ RUBRIC_TEMPLATES = [
             '  "dimension_scores": {"维度名": "A+/A/A-/B+/B/B-"},\n'
             '  "reasoning": {"维度名": {"evidence": "原文引用", "reasoning": "评级理由"}},\n'
             '  "extracted_features": {"arguments_count": 数量, "counter_arguments": 数量, "perspectives": 数量, "logical_connectors": []},\n'
+            '  "bonus_flags": ["有自己"]或["有新意"]或["有自己","有新意"]，未命中给[],\n'
             '  "confidence": "certain_good/certain_weak/uncertain",\n'
             '  "note": "给教师的简要说明",\n'
             '  "suggested_tags": ["标签1", "标签2"]\n'
-            '}\n\n'
+            '}\n'
+            '（严格 JSON：只输出一个 JSON 对象，不要 Markdown 代码块；字符串内的换行请用 \\n 转义）\n\n'
             '{CALIBRATION_EXAMPLES}'
         ),
     },
@@ -576,9 +468,9 @@ TAG_SEEDS = [
     '识别了隐藏假设', '论证有深度', '篇幅长但内容空洞',
     '反驳角度独特', '概念界定意识强',
     ('动物园', 'teacher', 1),
-    ('论证质量待加强', 'teacher', 1),
-    ('相关性极佳', 'teacher', 1),
-    ('表达需增强', 'teacher', 1),
+    ('结构待加强', 'teacher', 1),
+    ('紧扣主题', 'teacher', 1),
+    ('语言待精确', 'teacher', 1),
 ]
 
 # ══════════════════════════════════════════════════════════════
@@ -588,42 +480,42 @@ TAG_SEEDS = [
 CALIBRATION_SEEDS = [
     {
         'teacher_id': 'default',
-        'ai_original_scores': {'clarity': 'B+', 'relevance': 'B+', 'inference': 'B', 'evidence_use': 'B+'},
-        'teacher_final_scores': {'clarity': 'B+', 'relevance': 'A', 'inference': 'B', 'evidence_use': 'B+'},
+        'ai_original_scores': {'position': 'B+', 'material': 'B+', 'structure': 'B', 'language': 'B+', 'perspective': 'B+'},
+        'teacher_final_scores': {'position': 'B+', 'material': 'B+', 'structure': 'A', 'language': 'B+', 'perspective': 'B+'},
         'modifications': [
-            {'dimension': 'relevance', 'from_rating': 'B+', 'to_rating': 'A', 'reason': '虽然论据不多，但反驳角度很独特，应该给更高的相关性评分'},
+            {'dimension': 'structure', 'from_rating': 'B+', 'to_rating': 'A', 'reason': '虽然论据不多，但反驳角度很独特，逻辑链条值得更高的结构评分'},
         ],
         'note': '这个学生虽然论述不长，但切入角度很好，不应因篇幅短而降分',
         'student_grade': 4,
     },
     {
         'teacher_id': 'default',
-        'ai_original_scores': {'clarity': 'A', 'argument_evaluation': 'B+', 'depth_breadth': 'B+', 'self_regulation': 'B'},
-        'teacher_final_scores': {'clarity': 'A', 'argument_evaluation': 'A', 'depth_breadth': 'B+', 'self_regulation': 'B'},
+        'ai_original_scores': {'position': 'A', 'material': 'B+', 'structure': 'B+', 'language': 'A-', 'perspective': 'B+'},
+        'teacher_final_scores': {'position': 'A', 'material': 'A', 'structure': 'B+', 'language': 'A-', 'perspective': 'B+'},
         'modifications': [
-            {'dimension': 'argument_evaluation', 'from_rating': 'B+', 'to_rating': 'A', 'reason': '学生使用了具体的生活案例作为论据，这比引用数据更有说服力'},
+            {'dimension': 'material', 'from_rating': 'B+', 'to_rating': 'A', 'reason': '学生使用了具体的生活案例作为论据，这比引用数据更有说服力'},
         ],
         'note': '生活案例和统计数据一样有价值，不要因为没用数字就低估论据质量',
         'student_grade': 7,
     },
     {
         'teacher_id': 'default',
-        'ai_original_scores': {'clarity': 'B', 'relevance': 'B+', 'inference': 'B', 'evidence_use': 'B'},
-        'teacher_final_scores': {'clarity': 'B+', 'relevance': 'B+', 'inference': 'B+', 'evidence_use': 'B'},
+        'ai_original_scores': {'position': 'B', 'material': 'B+', 'structure': 'B', 'language': 'B', 'perspective': 'B+'},
+        'teacher_final_scores': {'position': 'B+', 'material': 'B+', 'structure': 'B+', 'language': 'B', 'perspective': 'B+'},
         'modifications': [
-            {'dimension': 'clarity', 'from_rating': 'B', 'to_rating': 'B+', 'reason': '虽然表达不太流畅，但能看出核心观点是什么'},
-            {'dimension': 'inference', 'from_rating': 'B', 'to_rating': 'B+', 'reason': f'学生用了{LQ}因为{RQ}这个词，说明有因果推理的意识'},
+            {'dimension': 'position', 'from_rating': 'B', 'to_rating': 'B+', 'reason': '虽然表达不太流畅，但能看出核心观点是什么'},
+            {'dimension': 'structure', 'from_rating': 'B', 'to_rating': 'B+', 'reason': f'学生用了{LQ}因为{RQ}这个词，说明有逻辑连接的意识'},
         ],
         'note': '这个学生表达比较吃力，但思维火花值得肯定，不要因为表达问题过度扣分',
         'student_grade': 3,
     },
     {
         'teacher_id': 'default',
-        'ai_original_scores': {'clarity': 'A', 'argument_evaluation': 'B', 'depth_breadth': 'B', 'self_regulation': 'B'},
-        'teacher_final_scores': {'clarity': 'A', 'argument_evaluation': 'B-', 'depth_breadth': 'B-', 'self_regulation': 'B'},
+        'ai_original_scores': {'position': 'A', 'material': 'B', 'structure': 'B', 'language': 'A-', 'perspective': 'B'},
+        'teacher_final_scores': {'position': 'A', 'material': 'B-', 'structure': 'B-', 'language': 'A-', 'perspective': 'B'},
         'modifications': [
-            {'dimension': 'argument_evaluation', 'from_rating': 'B', 'to_rating': 'B-', 'reason': f'全文都是{LQ}我觉得{RQ}{LQ}大家都知道{RQ}式断言，没有实质性论据'},
-            {'dimension': 'depth_breadth', 'from_rating': 'B', 'to_rating': 'B-', 'reason': '从头到尾只有一个角度的重复陈述'},
+            {'dimension': 'material', 'from_rating': 'B', 'to_rating': 'B-', 'reason': f'全文都是{LQ}我觉得{RQ}{LQ}大家都知道{RQ}式断言，没有实质性论据'},
+            {'dimension': 'structure', 'from_rating': 'B', 'to_rating': 'B-', 'reason': '从头到尾只有一个角度的重复陈述'},
         ],
         'note': '篇幅长不等于质量好，这篇论述表面流畅但缺乏实质内容',
         'student_grade': 6,
@@ -640,64 +532,67 @@ CALIBRATION_SEEDS = [
 TEACHER_REVIEWS = {
     1: {
         'topic_id': 1,
-        'teacher_dimension_scores': {'清晰性': 'B+', '解释力': 'A-', '证据意识': 'A-'},
-        'teacher_tags': ['能自发考虑反方观点', '情感投入丰富', '有简单因果推理'],
+        'teacher_dimension_scores': {'position': 'B+', 'material': 'A-', 'structure': 'B+', 'language': 'A-', 'perspective': 'A-'},
+        'teacher_tags': ['能自发考虑反方观点', '情感投入丰富', '有简单逻辑连接'],
+        'ai_bonus_flags': ['有新意'],
         'teacher_note': '',
         'teacher_confidence_override': None,
     },
     2: {
         'topic_id': 1,
-        'teacher_dimension_scores': {'清晰性': 'A-', '解释力': 'A-', '证据意识': 'B+'},
-        'teacher_tags': ['有解释意图', '证据意识萌芽', '口语化表达', '表达需增强'],
+        'teacher_dimension_scores': {'position': 'A-', 'material': 'B+', 'structure': 'B+', 'language': 'B+', 'perspective': 'B+'},
+        'teacher_tags': ['有解释意图', '选材意识萌芽', '口语化表达', '语言待精确'],
         'teacher_note': '',
         'teacher_confidence_override': None,
     },
     3: {
         'topic_id': 1,
-        'teacher_dimension_scores': {'清晰性': 'A', '解释力': 'A', '证据意识': 'B'},
-        'teacher_tags': ['表达清晰', '证据意识待发展'],
+        'teacher_dimension_scores': {'position': 'A', 'material': 'B', 'structure': 'A-', 'language': 'A', 'perspective': 'B+'},
+        'teacher_tags': ['观点表达清晰', '选材意识待发展'],
         'teacher_note': '',
         'teacher_confidence_override': None,
     },
     4: {
         'topic_id': 2,
-        'teacher_dimension_scores': {'清晰性': 'A', '相关性': 'A', '因果推理': 'A-', '证据使用': 'A'},
-        'teacher_tags': ['因果推理', '证据使用', '优秀论证'],
+        'teacher_dimension_scores': {'position': 'A', 'material': 'A', 'structure': 'A-', 'language': 'A-', 'perspective': 'B+'},
+        'teacher_tags': ['结构清晰', '选材具体', '论证有深度'],
+        'ai_bonus_flags': ['有自己'],
         'teacher_note': '',
         'teacher_confidence_override': None,
     },
     5: {
         'topic_id': 2,
-        'teacher_dimension_scores': {'清晰性': 'A-', '相关性': 'A', '因果推理': 'A-', '证据使用': 'A-'},
-        'teacher_tags': ['自我质疑', '事实与观点', '证据使用', '因果推理'],
-        'teacher_note': '证据使用尚可',
+        'teacher_dimension_scores': {'position': 'A-', 'material': 'A-', 'structure': 'A-', 'language': 'A', 'perspective': 'B+'},
+        'teacher_tags': ['自我质疑', '事实与观点', '选材具体', '结构清晰'],
+        'teacher_note': '选材尚可',
         'teacher_confidence_override': None,
     },
     6: {
         'topic_id': 2,
-        'teacher_dimension_scores': {'清晰性': 'A', '相关性': 'A+', '因果推理': 'A', '证据使用': 'A'},
-        'teacher_tags': ['逻辑推理清晰', '视角多元分析', '相关性极佳'],
-        'teacher_note': '相关性极佳',
+        'teacher_dimension_scores': {'position': 'A', 'material': 'A', 'structure': 'A', 'language': 'A-', 'perspective': 'A+'},
+        'teacher_tags': ['结构清晰', '视角多元分析', '紧扣主题'],
+        'ai_bonus_flags': ['有新意'],
+        'teacher_note': '紧扣主题',
         'teacher_confidence_override': None,
     },
     7: {
         'topic_id': 3,
-        'teacher_dimension_scores': {'clarity': 'A', 'relevance': 'A', 'argument_evaluation': 'B+', 'depth_breadth': 'A', 'self_regulation': 'A'},
-        'teacher_tags': ['多角度分析', '因果推理', '论证质量待加强'],
+        'teacher_dimension_scores': {'position': 'A', 'material': 'A', 'structure': 'B+', 'language': 'A-', 'perspective': 'A'},
+        'teacher_tags': ['多角度分析', '结构清晰', '结构待加强'],
         'teacher_note': '',
         'teacher_confidence_override': None,
     },
     8: {
         'topic_id': 3,
-        'teacher_dimension_scores': {'clarity': 'A', 'relevance': 'A', 'argument_evaluation': 'A-', 'depth_breadth': 'A', 'self_regulation': 'A-'},
-        'teacher_tags': ['因果推理', '概念分析', '反驳意识待加强', '动物园'],
-        'teacher_note': '很好的因果推理能力',
+        'teacher_dimension_scores': {'position': 'A', 'material': 'A', 'structure': 'A-', 'language': 'A-', 'perspective': 'A'},
+        'teacher_tags': ['结构清晰', '概念分析', '反驳意识待加强', '动物园'],
+        'teacher_note': '很好的逻辑结构能力',
         'teacher_confidence_override': None,
     },
     9: {
         'topic_id': 3,
-        'teacher_dimension_scores': {'clarity': 'B+', 'relevance': 'B+', 'argument_evaluation': 'B', 'depth_breadth': 'B', 'self_regulation': 'B'},
-        'teacher_tags': ['单一视角', '需加强因果推理', '个人经验主导', '缺乏反驳', '论证意识初现'],
+        'teacher_dimension_scores': {'position': 'B+', 'material': 'B', 'structure': 'B', 'language': 'B+', 'perspective': 'B'},
+        'teacher_tags': ['单一视角', '需加强逻辑连接', '个人经验主导', '缺乏反驳', '论证意识初现'],
         'teacher_note': '',
         'teacher_confidence_override': None,
     },
@@ -797,6 +692,7 @@ def seed(force=False):
             if review and review['topic_id'] == topic_order:
                 resp.teacher_dimension_scores = review['teacher_dimension_scores']
                 resp.teacher_tags = review['teacher_tags']
+                resp.ai_bonus_flags = review.get('ai_bonus_flags', [])
                 resp.teacher_note = review['teacher_note']
                 resp.teacher_confidence_override = review['teacher_confidence_override']
                 resp.teacher_reviewed = True
