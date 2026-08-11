@@ -4,6 +4,25 @@ import * as api from '../api/client';
 
 const SOURCE_LABEL = { audio: '🎙️ 音频', asr: '📝 妙记', manual: '✍️ 手动' };
 
+const ALLOWED_EXT = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.amr', '.wma', '.flac', '.webm', '.mp4'];
+const MAX_UPLOAD_MB = 20;          // generous hard cap for all providers
+const QWEN_ASR_MAX_MB = 7;         // qwen-asr base64 payload limit
+
+// Map upload failures to actionable guidance; always offer the paste fallback.
+const classifyUploadError = (err) => {
+  const status = err?.response?.status;
+  const detail = err?.response?.data?.detail || err?.message || '未知错误';
+  if (status === 400) return `文件格式或参数问题：${detail}。建议改用 mp3 / wav / m4a 后重试。`;
+  if (status === 413) return '文件过大，请压缩或截短录音后重试。';
+  if (status === 502) return `语音转写服务失败：${detail}。可在右侧「粘贴转写文本」手动录入兜底。`;
+  if (status === 500 || status === 503) return `服务暂时不可用（${detail}），请稍后重试，或用右侧「粘贴转写文本」兜底。`;
+  if (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '')) {
+    return '转写超时：录音可能过长或网络不稳。请截短音频重试，或用右侧「粘贴转写文本」兜底。';
+  }
+  if (!err?.response) return `无法连接后端服务：${detail}。请确认后端已启动，或用右侧「粘贴转写文本」兜底。`;
+  return `转写失败：${detail}`;
+};
+
 export default function RecordingsManager() {
   const { courseId, topics, students, responses, loadCourse } = useStore();
   const [topicId, setTopicId] = useState(null);
@@ -11,6 +30,7 @@ export default function RecordingsManager() {
   const [uploading, setUploading] = useState(false);
   const [text, setText] = useState('');
   const [msg, setMsg] = useState('');
+  const [msgType, setMsgType] = useState('ok');  // 'ok' | 'err' — drives bar color
   const [asr, setAsr] = useState(null);           // ASR settings from backend/demo client
   const [switchingAsr, setSwitchingAsr] = useState(false);
   const [asrMsg, setAsrMsg] = useState('');
@@ -32,6 +52,9 @@ export default function RecordingsManager() {
     : null;
 
   const activeProvider = asr?.providers?.find(p => p.id === asr.provider);
+  // A real provider is selected but not configured (e.g. missing API key) —
+  // uploads would always fail, so block them with guidance instead.
+  const providerNotReady = !!(asr && asr.provider !== 'mock' && activeProvider && !activeProvider.ready);
 
   const switchAsr = async (provider) => {
     const clearingDemo = provider !== 'mock' && !!asr?.demo_data_present;
@@ -60,20 +83,39 @@ export default function RecordingsManager() {
     }
   };
 
+  const showMsg = (m, type = 'ok') => { setMsg(m); setMsgType(type); };
+
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = '';               // allow re-selecting the same file
     if (!file || !studentId || !topicId) return;
+
+    // ── Client-side pre-validation: fail fast with guidance, no server round-trip ──
+    const ext = '.' + ((file.name.split('.').pop() || '').toLowerCase());
+    if (!ALLOWED_EXT.includes(ext)) {
+      showMsg(`不支持的格式 ${ext}：支持 ${ALLOWED_EXT.join(' / ')}。`, 'err');
+      return;
+    }
+    const sizeMb = file.size / 1024 / 1024;
+    if (sizeMb > MAX_UPLOAD_MB) {
+      showMsg(`文件过大（${sizeMb.toFixed(1)}MB）：请压缩或截短至 ${MAX_UPLOAD_MB}MB 以内再上传。`, 'err');
+      return;
+    }
+    if (asr?.provider === 'qwen_asr' && sizeMb > QWEN_ASR_MAX_MB) {
+      showMsg(`文件过大（${sizeMb.toFixed(1)}MB）：qwen-asr 上限约 ${QWEN_ASR_MAX_MB}MB，请截短录音或切换转写模式。`, 'err');
+      return;
+    }
+
     setUploading(true);
     setMsg('');
     try {
       await api.importAudio(courseId, studentId, topicId, file);
-      setMsg('转写完成，已写入作答 ✓');
+      showMsg('转写完成，已写入作答 ✓');
       await loadCourse(courseId);
     } catch (err) {
-      setMsg(`转写失败：${err?.response?.data?.detail || err?.message || '未知错误'}`);
+      showMsg(classifyUploadError(err), 'err');
     } finally {
       setUploading(false);
-      e.target.value = '';
     }
   };
 
@@ -82,10 +124,10 @@ export default function RecordingsManager() {
     try {
       await api.importText(courseId, studentId, topicId, text.trim());
       setText('');
-      setMsg('文本已保存，将进入评估 ✓');
+      showMsg('文本已保存，将进入评估 ✓');
       await loadCourse(courseId);
     } catch (err) {
-      setMsg(`保存失败：${err?.response?.data?.detail || err?.message || '未知错误'}`);
+      showMsg(`保存失败：${err?.response?.data?.detail || err?.message || '未知错误'}`, 'err');
     }
   };
 
@@ -179,19 +221,22 @@ export default function RecordingsManager() {
           <input
             ref={fileRef}
             type="file"
-            accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.amr,.wma,.flac"
+            accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.amr,.wma,.flac,.webm,.mp4"
             className="hidden"
             onChange={handleFile}
           />
           <button
             onClick={() => fileRef.current?.click()}
-            disabled={uploading}
-            className={`w-full text-sm py-2.5 rounded-lg font-medium transition-colors cursor-pointer
+            disabled={uploading || providerNotReady}
+            title={providerNotReady ? `当前转写模式未就绪：${activeProvider?.reason || '请检查配置'}` : ''}
+            className={`w-full text-sm py-2.5 rounded-lg font-medium transition-colors cursor-pointer disabled:cursor-not-allowed
               ${uploading
                 ? 'bg-indigo-50 text-indigo-500 border border-indigo-200'
-                : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                : providerNotReady
+                  ? 'bg-slate-100 text-slate-400'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
           >
-            {uploading ? '上传并转写中...' : '🎙️ 选择音频文件'}
+            {uploading ? '上传并转写中...' : providerNotReady ? '转写服务未就绪' : '🎙️ 选择音频文件'}
           </button>
           <div className="text-[11px] text-slate-400 mt-2">
             支持 mp3 / wav / m4a 等，系统自动转写
@@ -223,7 +268,13 @@ export default function RecordingsManager() {
         </div>
       </div>
 
-      {msg && <div className="text-xs text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-2">{msg}</div>}
+      {msg && (
+        <div className={`text-xs rounded-lg px-3 py-2 border ${
+          msgType === 'err'
+            ? 'text-red-600 bg-red-50 border-red-200'
+            : 'text-emerald-700 bg-emerald-50 border-emerald-200'
+        }`}>{msg}</div>
+      )}
 
       <div className="bg-white rounded-xl p-4 border border-slate-200">
         <div className="text-sm font-semibold text-slate-600 mb-2">当前作答</div>
