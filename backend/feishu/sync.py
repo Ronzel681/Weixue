@@ -64,12 +64,16 @@ _STATUS_LABELS = {"pending": "待评估", "assessed": "AI已评", "reviewed": "�
 
 # ── Pure record builders (testable without a Feishu connection) ─────────
 
-def _single(value: str) -> dict:
-    return {"text": str(value)}
+def _single(value: str) -> str:
+    # Verified against live API (2026-08): single-select fields accept the
+    # option name as a plain string; {"text": ...} fails with
+    # SingleSelectFieldConvFail.
+    return str(value)
 
 
-def _multi(values) -> list[dict]:
-    return [{"text": str(v)} for v in (values or []) if v]
+def _multi(values) -> list[str]:
+    # Multi-select fields take a plain array of option-name strings.
+    return [str(v) for v in (values or []) if v]
 
 
 def _ms(dt) -> int:

@@ -1,14 +1,19 @@
-"""Feishu bot (IM) integration: message/card sending + event callback verification.
+"""Feishu bot (IM) integration: message/card sending + event/card callback handling.
 
 APIs (verified 2026-08):
 - Send message: POST /open-apis/im/v1/messages?receive_id_type=open_id
 - Reply:        POST /open-apis/im/v1/messages/{message_id}/reply
-- Event callbacks: answer `challenge` and verify token (Encrypt Key optional)
+- Event callbacks: answer `challenge`, verify token and (when Encrypt Key is
+  configured) the sha256 request signature.
+- Card callbacks: verify the sha1 request signature against the Verification
+  Token, decrypt the body when encrypted, and dispatch button actions.
 
 Rate limits: 1000 req/min, 50 req/s overall; 5 QPS per user - batch sends carefully.
 """
 
 import base64
+import hashlib
+import hmac
 import json
 from typing import Any, Optional
 
@@ -55,6 +60,124 @@ class BotService:
                 "content": json.dumps({"text": text}, ensure_ascii=False),
             },
         )
+
+    @staticmethod
+    def verify_card_signature(
+        config: FeishuConfig,
+        raw_body: bytes,
+        timestamp: str,
+        nonce: str,
+        signature: str,
+    ) -> bool:
+        """Verify the `X-Lark-Signature` header of an interactive-card callback.
+
+        Algorithm (from the official Python SDK CardActionHandler): the digest is
+        sha1 of ``timestamp + nonce + verification_token + raw_body`` (hex).
+        The signature is only sent when a callback request address is configured;
+        when no Verification Token is set we reject rather than silently accept.
+        """
+        if not config.verification_token:
+            return False
+        if not raw_body or not timestamp or not nonce or not signature:
+            return False
+        bs = (
+            f"{timestamp}{nonce}{config.verification_token}".encode("utf-8")
+            + raw_body
+        )
+        digest = hashlib.sha1(bs).hexdigest()
+        return hmac.compare_digest(digest, signature)
+
+    @staticmethod
+    def decrypt_card_payload(config: FeishuConfig, raw_body: bytes) -> bytes:
+        """Return the plaintext card callback body (AES-decrypted when encrypted)."""
+        if not raw_body:
+            raise ValueError("empty card callback body")
+        try:
+            parsed = json.loads(raw_body.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError("card callback body is not valid JSON") from exc
+        if parsed.get("encrypt"):
+            inner = BotService._decrypt_event(config.encrypt_key, parsed["encrypt"])
+            return inner.encode("utf-8")
+        return raw_body
+
+    @staticmethod
+    def build_comment_card(
+        *,
+        title: str,
+        content: str,
+        course_id: int,
+        student_id: int,
+        response_id: int,
+        change_url: str = "",
+    ) -> dict:
+        """Build a Feishu interactive card (schema 2.0) with the three workflow
+        buttons: confirm review / change on web / send to student.
+
+        Button ``value`` carries the entity ids plus an ``action`` discriminator
+        that the card callback dispatches on.
+
+        When ``change_url`` is provided the middle "去网页修改" button is a plain
+        URL jump button that opens the web grading page directly (needs no
+        callback infrastructure). Otherwise it falls back to a callback button.
+        """
+        base = {
+            "course_id": course_id,
+            "student_id": student_id,
+            "response_id": response_id,
+        }
+        if change_url:
+            change_button = {
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "去网页修改",
+                },
+                "url": change_url,
+            }
+        else:
+            change_button = {
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "去网页修改",
+                },
+                "value": {**base, "action": "request_change"},
+            }
+        return {
+            "schema": "2.0",
+            "config": {"update_multi": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": "blue",
+            },
+            "body": {
+                "direction": "vertical",
+                "elements": [
+                    {"tag": "markdown", "content": content},
+                    # Schema 2.0 dropped the "action" container: buttons sit
+                    # directly in body.elements (live API error 200861 otherwise).
+                    {
+                        "tag": "button",
+                        "type": "primary",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": "确认评分",
+                        },
+                        "value": {**base, "action": "review_confirm"},
+                    },
+                    change_button,
+                    {
+                        "tag": "button",
+                        "text": {
+                            "tag": "plain_text",
+                            "content": "发送给学生",
+                        },
+                        "value": {**base, "action": "send_comment"},
+                    },
+                ],
+            },
+        }
 
     @staticmethod
     def handle_event(config: FeishuConfig, body: dict) -> dict:

@@ -21,6 +21,13 @@ from database import (
     init_db,
 )
 from feishu.client import FeishuClient, FeishuConfig
+
+# feishu.client's import runs load_dotenv on backend/.env; purge any real
+# credentials so "unconfigured" tests stay deterministic on machines that
+# already have live Feishu config.
+for _key in [k for k in os.environ if k.startswith("FEISHU_")]:
+    os.environ.pop(_key, None)
+
 from feishu.sync import (
     BitableSyncer,
     bitable_is_configured,
@@ -110,8 +117,8 @@ class RecordBuilderTests(unittest.TestCase):
         )
         fields = build_topic_record(topic)["fields"]
         self.assertEqual(fields["标题"], "动物应该养在动物园吗？")
-        self.assertEqual(fields["类型"], {"text": "两难"})
-        self.assertEqual(fields["认知梯段"], {"text": "发展层"})
+        self.assertEqual(fields["类型"], "两难")
+        self.assertEqual(fields["认知梯段"], "发展层")
         self.assertIn("正方一", fields["参考论据"])
 
     def test_student_record(self):
@@ -124,7 +131,7 @@ class RecordBuilderTests(unittest.TestCase):
         )
         fields = build_student_record(student)["fields"]
         self.assertEqual(fields["姓名"], "小雨")
-        self.assertEqual(fields["认知梯段"], {"text": "基础层"})
+        self.assertEqual(fields["认知梯段"], "基础层")
         self.assertEqual(fields["班级"], "思辨一班")
 
     def test_response_record_status_and_multi_select(self):
@@ -144,10 +151,10 @@ class RecordBuilderTests(unittest.TestCase):
         topic = SimpleNamespace(title="动物应该养在动物园吗？")
         fields = build_response_record(response, student, topic)["fields"]
         self.assertEqual(fields["学生"], "小雨")
-        self.assertEqual(fields["来源"], {"text": "音频转写"})
-        self.assertEqual(fields["AI置信度"], {"text": "高"})
-        self.assertEqual(fields["状态"], {"text": "教师已审"})
-        self.assertEqual(fields["AI建议标签"], [{"text": "因果推理"}, {"text": "证据意识"}])
+        self.assertEqual(fields["来源"], "音频转写")
+        self.assertEqual(fields["AI置信度"], "高")
+        self.assertEqual(fields["状态"], "教师已审")
+        self.assertEqual(fields["AI建议标签"], ["因果推理", "证据意识"])
         self.assertIn("clarity:A", fields["AI评分摘要"])
 
 

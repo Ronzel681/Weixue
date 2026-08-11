@@ -148,7 +148,7 @@ npm run dev                   # http://localhost:5173（自动代理到后端）
 | `ASR_MODEL` | 转写模型名称 | 按提供商自动匹配 |
 | `ASR_API_KEY` | 转写 API Key（留空复用 `LLM_API_KEY`） | — |
 
-### 飞书妙记接入（多维表格暂缓）
+### 飞书接入（妙记 + 多维表格）
 
 复制 `.env.example` 为 `.env`，填入企业自建应用凭证和一条可选的已完成妙记样本：
 
@@ -166,7 +166,16 @@ python -m feishu.check
 python -m feishu.check --minute-token obcnxxx
 ```
 
-启动后端后，`GET /api/health` 检查数据库、飞书鉴权和可选妙记样本；`GET /api/feishu/minutes/{minute_token}/transcript` 读取已完成的转写。多维表格同步在文档级权限完成前保持 `deferred`，不会伪装为已接通。
+启动后端后，`GET /api/health` 检查数据库、飞书鉴权和可选妙记样本；`GET /api/feishu/minutes/{minute_token}/transcript` 读取已完成的转写。
+
+**多维表格（已联调，2026-08-10）**：评估完成 / 教师保存后，本地数据单向同步到多维表格（班级 / 辩题 / 学生 / 评估记录四张表），本地库是唯一事实源，表格只作展示与审阅面。应用凭证就位后一键引导：
+
+```bash
+cd backend
+python -m feishu.bootstrap_base   # 建 base + 4 表 + 写回 .env + 建字段选项 + 全量同步（幂等可重跑）
+```
+
+`FEISHU_BITABLE_APP_TOKEN` 与 `FEISHU_BITABLE_TABLE_IDS` 由引导脚本自动写回 `.env`；未配置时同步保持 `deferred`，不会伪装为已接通，`GET /api/feishu/bitable/status` 可查看实时状态。联调细节与踩坑记录见 [docs/多维表格联调记录_2026-08-10.md](./docs/多维表格联调记录_2026-08-10.md)。
 
 ### 更新纯前端 demo 数据
 
