@@ -109,6 +109,7 @@ class BotService:
         course_id: int,
         student_id: int,
         response_id: int,
+        comment_hash: str = "",
         change_url: str = "",
     ) -> dict:
         """Build a Feishu interactive card (schema 2.0) with the three workflow
@@ -126,6 +127,8 @@ class BotService:
             "student_id": student_id,
             "response_id": response_id,
         }
+        if comment_hash:
+            base["comment_hash"] = comment_hash
         if change_url:
             change_button = {
                 "tag": "button",
@@ -174,6 +177,36 @@ class BotService:
                             "content": "发送给学生",
                         },
                         "value": {**base, "action": "send_comment"},
+                    },
+                ],
+            },
+        }
+
+    @staticmethod
+    def build_student_comment_card(
+        *,
+        student_name: str,
+        comment: str,
+    ) -> dict:
+        """Build the read-only card delivered to one bound student account."""
+        safe_name = (student_name or "同学").strip()
+        safe_comment = (comment or "").strip()
+        return {
+            "schema": "2.0",
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": f"思辨星 · {safe_name}的课堂反馈",
+                },
+                "template": "green",
+            },
+            "body": {
+                "direction": "vertical",
+                "elements": [
+                    {"tag": "markdown", "content": safe_comment},
+                    {
+                        "tag": "markdown",
+                        "content": "---\n*这份反馈已经过老师确认，请继续保持思考与表达。*",
                     },
                 ],
             },

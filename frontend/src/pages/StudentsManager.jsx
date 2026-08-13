@@ -4,6 +4,12 @@ import * as api from '../api/client';
 
 const TIER_LABEL = { basic: '基础层', developing: '发展层', advancing: '进阶层' };
 const SOURCE_LABEL = { audio: '🎙️', asr: '📝', manual: '✍️' };
+const DELIVERY_LABEL = {
+  not_sent: { text: '评语未发送', cls: 'text-slate-500 bg-slate-100' },
+  sending: { text: '飞书发送中', cls: 'text-amber-700 bg-amber-50' },
+  delivered: { text: '评语已送达', cls: 'text-green-700 bg-green-50' },
+  failed: { text: '飞书发送失败', cls: 'text-red-600 bg-red-50' },
+};
 
 const respStatus = (r) => {
   if (r.teacher_reviewed) return { text: '已批改', cls: 'text-indigo-600 bg-indigo-50' };
@@ -158,7 +164,23 @@ export default function StudentsManager() {
                       <div className="text-[11px] text-slate-400">{TIER_LABEL[st.cognitive_tier] || st.cognitive_tier}</div>
                     </div>
                     <div className="text-sm text-slate-600 w-20">{st.grade}年级</div>
-                    <div className="flex-1 text-xs text-slate-400">{countByStudent[st.id] || 0} 份作答</div>
+                    <div className="flex-1 flex items-center gap-2 text-xs text-slate-400">
+                      <span>{countByStudent[st.id] || 0} 份作答</span>
+                      <span className={`px-1.5 py-0.5 rounded ${st.feishu_open_id ? 'text-blue-700 bg-blue-50' : 'text-slate-500 bg-slate-100'}`}>
+                        {st.feishu_open_id ? '飞书已绑定' : '飞书未绑定'}
+                      </span>
+                      {st.comment_draft && (() => {
+                        const delivery = DELIVERY_LABEL[st.comment_delivery_status || 'not_sent'] || DELIVERY_LABEL.not_sent;
+                        return (
+                          <span
+                            className={`px-1.5 py-0.5 rounded ${delivery.cls}`}
+                            title={st.comment_delivery_error || ''}
+                          >
+                            {delivery.text}
+                          </span>
+                        );
+                      })()}
+                    </div>
                     <button
                       onClick={() => setExpandedId(expandedId === st.id ? null : st.id)}
                       className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-500 cursor-pointer hover:bg-slate-50"
@@ -212,36 +234,66 @@ export default function StudentsManager() {
 function EditRow({ student, onDone, onCancel }) {
   const [name, setName] = useState(student.name);
   const [grade, setGrade] = useState(student.grade);
+  const [feishuOpenId, setFeishuOpenId] = useState(student.feishu_open_id || '');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSave = async () => {
     if (!name.trim()) return;
+    const openId = feishuOpenId.trim();
+    if (openId && !openId.startsWith('ou_')) {
+      setError('open_id 应以 ou_ 开头');
+      return;
+    }
     setSaving(true);
-    await api.updateStudent(student.id, { name: name.trim(), grade: parseInt(grade, 10) || student.grade });
-    setSaving(false);
-    await onDone();
+    setError('');
+    try {
+      await api.updateStudent(student.id, {
+        name: name.trim(),
+        grade: parseInt(grade, 10) || student.grade,
+        feishu_open_id: openId,
+      });
+      await onDone();
+    } catch (e) {
+      setError(e?.response?.data?.detail || e?.message || '保存失败');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <input
-        value={name}
-        onChange={e => setName(e.target.value)}
-        className="w-40 text-sm border border-slate-200 rounded-lg px-2 py-1 outline-none"
-      />
-      <select value={grade} onChange={e => setGrade(parseInt(e.target.value, 10))} className="text-sm border border-slate-200 rounded-lg px-2 py-1 outline-none cursor-pointer">
-        {[1, 2, 3, 4, 5, 6, 7].map(g => <option key={g} value={g}>{g}年级</option>)}
-      </select>
-      <button
-        onClick={handleSave}
-        disabled={saving || !name.trim()}
-        className="text-xs px-2.5 py-1 rounded-md bg-indigo-600 text-white cursor-pointer hover:bg-indigo-700 disabled:opacity-40"
-      >
-        {saving ? '保存中...' : '保存'}
-      </button>
-      <button onClick={onCancel} className="text-xs px-2.5 py-1 rounded-md border border-slate-200 bg-white text-slate-500 cursor-pointer">
-        取消
-      </button>
+    <div className="flex flex-col gap-2 py-1">
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="学生姓名"
+          className="w-40 text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-1 focus:ring-indigo-300"
+        />
+        <select value={grade} onChange={e => setGrade(parseInt(e.target.value, 10))} className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none cursor-pointer">
+          {[1, 2, 3, 4, 5, 6, 7].map(g => <option key={g} value={g}>{g}年级</option>)}
+        </select>
+        <input
+          value={feishuOpenId}
+          onChange={e => setFeishuOpenId(e.target.value)}
+          placeholder="学生飞书 open_id（ou_...）"
+          className="min-w-[280px] flex-1 text-sm font-mono border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-1 focus:ring-indigo-300"
+        />
+        <button
+          onClick={handleSave}
+          disabled={saving || !name.trim()}
+          className="text-xs px-2.5 py-1.5 rounded-md bg-indigo-600 text-white cursor-pointer hover:bg-indigo-700 disabled:opacity-40"
+        >
+          {saving ? '保存中...' : '保存'}
+        </button>
+        <button onClick={onCancel} className="text-xs px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-slate-500 cursor-pointer">
+          取消
+        </button>
+      </div>
+      <div className="text-[11px] text-slate-400">
+        留空表示解除绑定；open_id 可用项目中的飞书查询脚本按手机号或邮箱获取。
+        {error && <span className="ml-2 text-red-500">{error}</span>}
+      </div>
     </div>
   );
 }

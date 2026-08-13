@@ -93,6 +93,14 @@ class Student(Base):
     name = Column(String(100), nullable=False)
     grade = Column(Integer, nullable=False)   # 1-7
     comment_draft = Column(Text, default="")  # saved comment draft
+    # The user's identity is scoped to the current Feishu app.  It is stored on
+    # the student rather than in environment variables so each comment can be
+    # routed to the matching recipient.
+    feishu_open_id = Column(String(100), default="")
+    comment_delivery_status = Column(String(20), default="not_sent")
+    comment_delivery_hash = Column(String(64), default="")
+    comment_delivery_error = Column(Text, default="")
+    comment_delivered_at = Column(DateTime, nullable=True)
 
     course = relationship("Course", back_populates="students")
     responses = relationship("StudentResponse", back_populates="student",
@@ -355,12 +363,26 @@ def init_db():
 def _migrate():
     """Lightweight additive migrations for existing SQLite databases.
 
-    SQLAlchemy create_all() does not alter existing tables, so new columns on
-    StudentResponse are added here with plain ALTER TABLE statements.
+    SQLAlchemy create_all() does not alter existing tables, so additive columns
+    on existing Student and StudentResponse tables are created here.
     """
     from sqlalchemy import text
 
     with engine.connect() as conn:
+        student_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(students)"))
+        }
+        if "feishu_open_id" not in student_cols:
+            conn.execute(text("ALTER TABLE students ADD COLUMN feishu_open_id VARCHAR(100) DEFAULT ''"))
+        if "comment_delivery_status" not in student_cols:
+            conn.execute(text("ALTER TABLE students ADD COLUMN comment_delivery_status VARCHAR(20) DEFAULT 'not_sent'"))
+        if "comment_delivery_hash" not in student_cols:
+            conn.execute(text("ALTER TABLE students ADD COLUMN comment_delivery_hash VARCHAR(64) DEFAULT ''"))
+        if "comment_delivery_error" not in student_cols:
+            conn.execute(text("ALTER TABLE students ADD COLUMN comment_delivery_error TEXT DEFAULT ''"))
+        if "comment_delivered_at" not in student_cols:
+            conn.execute(text("ALTER TABLE students ADD COLUMN comment_delivered_at DATETIME"))
+
         cols = {row[1] for row in conn.execute(text("PRAGMA table_info(student_responses)"))}
         if "source" not in cols:
             conn.execute(text("ALTER TABLE student_responses ADD COLUMN source VARCHAR(20) DEFAULT 'manual'"))
@@ -374,6 +396,10 @@ def _migrate():
             conn.execute(text("ALTER TABLE student_responses ADD COLUMN processing_status VARCHAR(20) DEFAULT 'not_started'"))
         if "teacher_rating" not in cols:
             conn.execute(text("ALTER TABLE student_responses ADD COLUMN teacher_rating VARCHAR(20) DEFAULT ''"))
+        if "ai_bonus_flags" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN ai_bonus_flags JSON DEFAULT '[]'"))
+        if "dialogue_finished" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN dialogue_finished VARCHAR(20)"))
         prep_cols = {
             row[1] for row in conn.execute(text("PRAGMA table_info(prep_plans)"))
         }

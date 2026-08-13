@@ -105,6 +105,7 @@ class CommentCardTests(unittest.TestCase):
             course_id=1,
             student_id=2,
             response_id=3,
+            comment_hash="hash_v1",
         )
         self.assertEqual(card["schema"], "2.0")
         self.assertEqual(
@@ -121,6 +122,18 @@ class CommentCardTests(unittest.TestCase):
             self.assertEqual(b["value"]["course_id"], 1)
             self.assertEqual(b["value"]["student_id"], 2)
             self.assertEqual(b["value"]["response_id"], 3)
+            self.assertEqual(b["value"]["comment_hash"], "hash_v1")
+
+    def test_student_card_is_read_only_and_contains_comment(self):
+        card = BotService.build_student_comment_card(
+            student_name="小雨",
+            comment="你的理由很清楚，继续保持！",
+        )
+        self.assertEqual(card["header"]["template"], "green")
+        self.assertIn("小雨", card["header"]["title"]["content"])
+        elements = card["body"]["elements"]
+        self.assertIn("你的理由很清楚", elements[0]["content"])
+        self.assertFalse(any(e.get("tag") == "button" for e in elements))
 
 
 class BitableSchemaTests(unittest.IsolatedAsyncioTestCase):
@@ -214,8 +227,11 @@ import hashlib
 import json
 import os
 import tempfile
+import httpx
 
-_TMP = tempfile.mkdtemp(prefix="weixue_feishu_card_child_")
+_TEST_TMP_ROOT = os.path.join(os.path.dirname(os.getcwd()), "tmp", "tests")
+os.makedirs(_TEST_TMP_ROOT, exist_ok=True)
+_TMP = tempfile.mkdtemp(prefix="weixue_feishu_card_child_", dir=_TEST_TMP_ROOT)
 os.environ["WEIXUE_DB_PATH"] = os.path.join(_TMP, "test.db")
 os.environ["FEISHU_VERIFICATION_TOKEN"] = "vt_test"
 
@@ -227,6 +243,11 @@ os.environ["FEISHU_VERIFICATION_TOKEN"] = "vt_test"
 import dotenv
 
 dotenv.load_dotenv = lambda *args, **kwargs: False
+# The parent test process may already have loaded the developer's real .env.
+# Never let the isolated child inherit live Feishu recipients or credentials.
+for _key in [k for k in os.environ if k.startswith("FEISHU_")]:
+    os.environ.pop(_key, None)
+os.environ["FEISHU_VERIFICATION_TOKEN"] = "vt_test"
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -241,6 +262,9 @@ from database import (  # noqa: E402
     init_db,
 )
 from main import app  # noqa: E402
+from feishu.card_actions import dispatch_card_action  # noqa: E402
+from feishu.comment_delivery import deliver_student_comment  # noqa: E402
+from feishu.client import FeishuClient, FeishuConfig  # noqa: E402
 
 init_db()
 db = SessionLocal()
@@ -352,9 +376,106 @@ db.close()
 r = signed_post(card("request_change"))
 results["change_toast"] = r.json().get("toast", {})
 
-# 3. send_comment without FEISHU_TEACHER_OPEN_ID -> honest 待联调 toast.
+# 3. An unbound student is rejected honestly.
 r = signed_post(card("send_comment"))
 results["send_toast"] = r.json().get("toast", {})
+
+# 3b. The student API validates and exposes the binding.
+r = client.put("/api/students/%d" % sid, json={"feishu_open_id": "bad_id"})
+results["bad_open_id_status"] = r.status_code
+r = client.put("/api/students/%d" % sid, json={"feishu_open_id": "ou_student"})
+results["bind_status"] = r.status_code
+results["bound_open_id"] = r.json().get("feishu_open_id")
+
+# Reserve one delivery and reject a duplicate click.
+db = SessionLocal()
+scheduled = []
+r1 = dispatch_card_action(
+    db,
+    card("send_comment")["event"]["action"]["value"],
+    schedule_comment_delivery=lambda student_id, draft_hash: scheduled.append(
+        (student_id, draft_hash)
+    ),
+)
+r2 = dispatch_card_action(
+    db,
+    card("send_comment")["event"]["action"]["value"],
+    schedule_comment_delivery=lambda student_id, draft_hash: scheduled.append(
+        (student_id, draft_hash)
+    ),
+)
+student = db.get(Student, sid)
+delivery_hash = student.comment_delivery_hash
+results["reserved_toast"] = r1.get("toast", {})
+results["duplicate_toast"] = r2.get("toast", {})
+results["scheduled_count"] = len(scheduled)
+results["reserved_status"] = student.comment_delivery_status
+db.close()
+
+# A stale teacher card cannot send a draft changed after the card was issued.
+db = SessionLocal()
+student = db.get(Student, sid)
+student.comment_delivery_status = "not_sent"
+student.comment_delivery_hash = ""
+db.commit()
+stale_value = card("send_comment")["event"]["action"]["value"]
+stale_value["comment_hash"] = hashlib.sha256(b"old comment").hexdigest()
+stale = dispatch_card_action(
+    db,
+    stale_value,
+    schedule_comment_delivery=lambda *_: scheduled.append(("stale", "stale")),
+)
+results["stale_toast"] = stale.get("toast", {})
+results["scheduled_after_stale"] = len(scheduled)
+# Restore the legitimate reservation for the mocked delivery below.
+student.comment_delivery_status = "sending"
+student.comment_delivery_hash = delivery_hash
+db.commit()
+db.close()
+
+# 3c. Deliver with a fake Feishu API and persist the successful result.
+sent = {}
+async def handler(request):
+    if request.url.path.endswith("/tenant_access_token/internal/"):
+        return httpx.Response(200, json={
+            "code": 0, "msg": "success",
+            "tenant_access_token": "t-test", "expire": 7200,
+        })
+    if request.url.path.endswith("/im/v1/messages"):
+        sent.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"code": 0, "msg": "success", "data": {}})
+    return httpx.Response(404, json={"code": 99999, "msg": request.url.path})
+
+config = FeishuConfig()
+config.app_id = "cli_test"
+config.app_secret = "secret"
+config.base_url = "https://example.test"
+http = httpx.AsyncClient(
+    transport=httpx.MockTransport(handler), base_url="https://example.test"
+)
+feishu_client = FeishuClient(config=config, http_client=http)
+import asyncio
+asyncio.run(deliver_student_comment(sid, delivery_hash, feishu_client))
+asyncio.run(feishu_client.close())
+db = SessionLocal()
+student = db.get(Student, sid)
+results["delivered_status"] = student.comment_delivery_status
+results["delivery_error"] = student.comment_delivery_error
+results["sent_receive_id"] = sent.get("receive_id")
+results["sent_msg_type"] = sent.get("msg_type")
+db.close()
+
+# 3d. Editing the draft creates a new unsent delivery item.
+r = client.post(
+    "/api/courses/%d/comments/save" % cid,
+    json={"student_id": sid, "draft": "这是一份更新后的评语。"},
+)
+results["draft_save_status"] = r.status_code
+db = SessionLocal()
+student = db.get(Student, sid)
+results["status_after_edit"] = student.comment_delivery_status
+results["hash_after_edit"] = student.comment_delivery_hash
+db.close()
 
 # 4. Bad signature -> 401.
 r = signed_post(
@@ -437,7 +558,24 @@ class CardCallbackAPITests(unittest.TestCase):
 
         self.assertEqual(result["change_toast"]["type"], "info")
         self.assertEqual(result["send_toast"]["type"], "warning")
-        self.assertIn("待联调", result["send_toast"]["content"])
+        self.assertIn("尚未绑定飞书账号", result["send_toast"]["content"])
+        self.assertEqual(result["reserved_toast"]["type"], "success")
+        self.assertEqual(result["bad_open_id_status"], 400)
+        self.assertEqual(result["bind_status"], 200)
+        self.assertEqual(result["bound_open_id"], "ou_student")
+        self.assertEqual(result["duplicate_toast"]["type"], "info")
+        self.assertEqual(result["scheduled_count"], 1)
+        self.assertEqual(result["reserved_status"], "sending")
+        self.assertEqual(result["stale_toast"]["type"], "warning")
+        self.assertIn("重新推送确认卡", result["stale_toast"]["content"])
+        self.assertEqual(result["scheduled_after_stale"], 1)
+        self.assertEqual(result["delivered_status"], "delivered")
+        self.assertEqual(result["delivery_error"], "")
+        self.assertEqual(result["sent_receive_id"], "ou_student")
+        self.assertEqual(result["sent_msg_type"], "interactive")
+        self.assertEqual(result["draft_save_status"], 200)
+        self.assertEqual(result["status_after_edit"], "not_sent")
+        self.assertEqual(result["hash_after_edit"], "")
 
         self.assertEqual(result["bad_signature_status"], 401)
         self.assertEqual(result["token_mismatch_status"], 403)

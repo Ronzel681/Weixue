@@ -31,6 +31,7 @@ from database import SessionLocal
 
 from .bot import BotService
 from .card_actions import dispatch_card_action
+from .comment_delivery import deliver_student_comment
 from .client import FeishuClient, FeishuConfig
 from .sync import BitableSyncer
 
@@ -70,6 +71,18 @@ def _schedule_sync(response_id: int) -> None:
     ).start()
 
 
+def _deliver_comment_blocking(student_id: int, draft_hash: str) -> None:
+    asyncio.run(deliver_student_comment(student_id, draft_hash))
+
+
+def _schedule_comment_delivery(student_id: int, draft_hash: str) -> None:
+    threading.Thread(
+        target=_deliver_comment_blocking,
+        args=(student_id, draft_hash),
+        daemon=True,
+    ).start()
+
+
 def on_card_action(data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
     """card.action.trigger: a button on one of our interactive cards was
     clicked. Shares dispatch with the HTTP /api/feishu/card endpoint."""
@@ -79,7 +92,12 @@ def on_card_action(data: P2CardActionTrigger) -> P2CardActionTriggerResponse:
 
     db = SessionLocal()
     try:
-        result = dispatch_card_action(db, value, schedule_sync=_schedule_sync)
+        result = dispatch_card_action(
+            db,
+            value,
+            schedule_sync=_schedule_sync,
+            schedule_comment_delivery=_schedule_comment_delivery,
+        )
     except Exception:
         result = {"toast": {"type": "error", "content": "处理失败，请到网页端操作"}}
     finally:

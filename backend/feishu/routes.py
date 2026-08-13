@@ -31,6 +31,7 @@ from database import (
 
 from .bot import BotService
 from .card_actions import dispatch_card_action
+from .comment_delivery import deliver_student_comment
 from .client import FeishuClient, FeishuConfig
 from .sync import (
     BitableSyncer,
@@ -244,5 +245,8 @@ async def feishu_card(
         value,
         schedule_sync=lambda rid: background_tasks.add_task(
             _sync_response_after_review, rid
+        ),
+        schedule_comment_delivery=lambda sid, draft_hash: background_tasks.add_task(
+            deliver_student_comment, sid, draft_hash, get_client()
         ),
     )

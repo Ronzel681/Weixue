@@ -4,10 +4,11 @@ Usage (from backend/):
     python -m feishu.resolve_open_id --mobile 13800000000
     python -m feishu.resolve_open_id --email you@example.com
 
-The result is the open_id of that user *under this app* (open_id is per-app),
-which is exactly what FEISHU_TEACHER_OPEN_ID needs.
+The result is the open_id of that user *under this app* (open_id is per-app).
+Use a teacher result as FEISHU_TEACHER_OPEN_ID; bind student results in the
+Web app's 学生管理 page.
 
-Requires the app scope contact:user.base:readonly and that the target user is
+Requires the app scope contact:user.id:readonly and that the target user is
 inside the app's contact visibility scope. When the scope is missing the Feishu
 error message contains a console link to grant it.
 """
@@ -65,7 +66,7 @@ def main() -> None:
         print(f"查询失败：{exc}")
         if "99991672" in str(exc):
             print("\n应用缺少通讯录权限：点上面报错里的链接，开通 "
-                  "contact:user.base:readonly 后重试。")
+                  "contact:user.id:readonly 后重试。")
         return
 
     items = (result or {}).get("user_list") or []
@@ -76,7 +77,10 @@ def main() -> None:
         if open_id:
             found = True
             print(f"找到：{lookup} -> {open_id}")
-            print("把上面 ou_ 开头的值填进 backend/.env 的 FEISHU_TEACHER_OPEN_ID=")
+            print(
+                "老师账号：填入项目根目录 .env 的 FEISHU_TEACHER_OPEN_ID；"
+                "学生账号：在网页端“学生管理”中绑定。"
+            )
         else:
             print(f"未找到：{lookup}（该账号不在应用可见范围内，或手机号/邮箱不匹配）")
     if not found:

@@ -159,7 +159,12 @@ export const createStudentsBatch = (cid, students) => {
   let nextId = Math.max(0, ..._data.students.map(s => s.id)) + 1;
   students.forEach(s => {
     if (_data.students.some(x => x.course_id === cid && x.name === s.name)) return;
-    const st = { id: nextId++, course_id: cid, name: s.name, grade: s.grade, comment_draft: '' };
+    const st = {
+      id: nextId++, course_id: cid, name: s.name, grade: s.grade,
+      comment_draft: '', feishu_open_id: s.feishu_open_id || '',
+      comment_delivery_status: 'not_sent', comment_delivery_error: '',
+      comment_delivered_at: null,
+    };
     _data.students.push(st);
     created.push(st);
   });
@@ -168,7 +173,15 @@ export const createStudentsBatch = (cid, students) => {
 };
 export const updateStudent = (sid, data) => {
   const s = _data.students.find(x => x.id === sid);
-  if (s) Object.assign(s, data);
+  if (s) {
+    if (data.feishu_open_id !== undefined && data.feishu_open_id !== (s.feishu_open_id || '')) {
+      Object.assign(s, {
+        comment_delivery_status: 'not_sent', comment_delivery_error: '',
+        comment_delivered_at: null,
+      });
+    }
+    Object.assign(s, data);
+  }
   _persist();
   return ok(s);
 };
@@ -486,14 +499,24 @@ export const generateComment = (cid, studentId) => {
 export const saveCommentDraft = (cid, studentId, draft) => {
   const student = _data.students.find(s => s.id === studentId && s.course_id === cid);
   if (!student) return Promise.reject(new Error('Student not found'));
-  student.comment_draft = draft;
+  if (student.comment_draft !== draft) {
+    student.comment_draft = draft;
+    student.comment_delivery_status = 'not_sent';
+    student.comment_delivery_error = '';
+    student.comment_delivered_at = null;
+  }
   _persist();
   return ok({ ok: true, student_id: studentId });
 };
 export const sendComment = (cid, studentId, draft) => {
   const student = _data.students.find(s => s.id === studentId && s.course_id === cid);
   if (!student) return Promise.reject(new Error('Student not found'));
-  student.comment_draft = draft;
+  if (student.comment_draft !== draft) {
+    student.comment_draft = draft;
+    student.comment_delivery_status = 'not_sent';
+    student.comment_delivery_error = '';
+    student.comment_delivered_at = null;
+  }
   _persist();
   return ok({
     ok: true,

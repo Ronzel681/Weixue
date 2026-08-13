@@ -13,18 +13,16 @@ from typing import Callable, Optional
 
 from sqlalchemy.orm import Session
 
-from database import PrepPlan, StudentResponse
+from database import PrepPlan, Student, StudentResponse
 
-from .client import FeishuConfig
 from .reviews import apply_teacher_review
-
-_config = FeishuConfig()
 
 
 def dispatch_card_action(
     db: Session,
     value: dict,
     schedule_sync: Optional[Callable[[int], None]] = None,
+    schedule_comment_delivery: Optional[Callable[[int, str], None]] = None,
 ) -> dict:
     """Dispatch one card button action by its ``value["action"]`` name."""
     if not isinstance(value, dict):
@@ -41,7 +39,7 @@ def dispatch_card_action(
             }
         }
     if action_name == "send_comment":
-        return _card_send_comment(value)
+        return _card_send_comment(db, value, schedule_comment_delivery)
     if action_name == "prep_confirm":
         return _card_prep_confirm(db, value)
     return {"toast": {"type": "warning", "content": "未知操作，请升级应用"}}
@@ -84,20 +82,119 @@ def _card_review_confirm(
     return {"toast": {"type": "success", "content": "评分已确认，校准记录已保存"}}
 
 
-def _card_send_comment(value: dict) -> dict:
-    """'Send to student' button: student accounts are not bound to Feishu yet,
-    so this is honestly reported as 待联调 instead of faking success."""
-    if not _config.teacher_open_id:
+def _card_send_comment(
+    db: Session,
+    value: dict,
+    schedule_comment_delivery: Optional[Callable[[int, str], None]],
+) -> dict:
+    """Validate and atomically reserve a comment delivery for one student."""
+    try:
+        student_id = int(value.get("student_id") or 0)
+    except (TypeError, ValueError):
+        return {"toast": {"type": "error", "content": "卡片参数无效"}}
+
+    student = db.get(Student, student_id)
+    if not student:
+        return {"toast": {"type": "error", "content": "学生不存在"}}
+    try:
+        course_id = int(value.get("course_id") or 0)
+    except (TypeError, ValueError):
+        course_id = 0
+    if course_id and student.course_id != course_id:
+        return {"toast": {"type": "error", "content": "卡片与学生信息不匹配"}}
+    if not (student.feishu_open_id or "").strip():
         return {
             "toast": {
                 "type": "warning",
-                "content": "待联调：尚未配置 FEISHU_TEACHER_OPEN_ID",
+                "content": f"{student.name}尚未绑定飞书账号，请先在学生管理中绑定",
+            }
+        }
+    if not (student.comment_draft or "").strip():
+        return {
+            "toast": {"type": "warning", "content": f"{student.name}暂无可发送的评语"}
+        }
+    if schedule_comment_delivery is None:
+        return {
+            "toast": {
+                "type": "warning",
+                "content": "发送服务未启动，评语仍保存在系统中",
+            }
+        }
+
+    import hashlib
+
+    draft_hash = hashlib.sha256(student.comment_draft.strip().encode("utf-8")).hexdigest()
+    card_hash = str(value.get("comment_hash") or "").strip()
+    if card_hash and card_hash != draft_hash:
+        return {
+            "toast": {
+                "type": "warning",
+                "content": "评语已在网页端修改，请重新推送确认卡后再发送",
+            }
+        }
+    if (
+        student.comment_delivery_hash == draft_hash
+        and student.comment_delivery_status == "delivered"
+    ):
+        return {
+            "toast": {"type": "info", "content": f"这份评语已发送给{student.name}"}
+        }
+    if (
+        student.comment_delivery_hash == draft_hash
+        and student.comment_delivery_status == "sending"
+    ):
+        return {
+            "toast": {"type": "info", "content": f"正在发送给{student.name}，请勿重复点击"}
+        }
+
+    # Conditional UPDATE makes duplicate clicks safe even when two callbacks
+    # arrive at almost the same time.
+    reserved = (
+        db.query(Student)
+        .filter(
+            Student.id == student.id,
+            ~(
+                (Student.comment_delivery_hash == draft_hash)
+                & Student.comment_delivery_status.in_(["sending", "delivered"])
+            ),
+        )
+        .update(
+            {
+                Student.comment_delivery_status: "sending",
+                Student.comment_delivery_hash: draft_hash,
+                Student.comment_delivery_error: "",
+                Student.comment_delivered_at: None,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    if not reserved:
+        db.expire_all()
+        current = db.get(Student, student.id)
+        if current and current.comment_delivery_status == "delivered":
+            content = f"这份评语已发送给{student.name}"
+        else:
+            content = f"正在发送给{student.name}，请勿重复点击"
+        return {"toast": {"type": "info", "content": content}}
+    try:
+        schedule_comment_delivery(student.id, draft_hash)
+    except Exception as exc:
+        student = db.get(Student, student.id)
+        if student and student.comment_delivery_hash == draft_hash:
+            student.comment_delivery_status = "failed"
+            student.comment_delivery_error = str(exc)[:500]
+            db.commit()
+        return {
+            "toast": {
+                "type": "error",
+                "content": "发送任务启动失败，评语仍保存在系统中",
             }
         }
     return {
         "toast": {
-            "type": "warning",
-            "content": "待联调：学生暂未绑定飞书账号，评语已保存在系统中",
+            "type": "success",
+            "content": f"已提交发送给{student.name}，投递结果将记录在学生管理中",
         }
     }
 

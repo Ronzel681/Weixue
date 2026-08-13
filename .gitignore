@@ -20,3 +20,5 @@ record.m4a
 backend/bootstrap_run2.json
 backend/data/grading.db.bak*
 .DS_Store
+tmp/
+.venv-powershell/

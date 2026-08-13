@@ -1,5 +1,6 @@
 """FastAPI application — all routes for the critical thinking assessment system."""
 
+import hashlib
 import os
 import re
 from datetime import datetime
@@ -511,32 +512,51 @@ def delete_topic(tid: int, db: Session = Depends(get_db)):
 # Students
 # ════════════════════════════════════════════════════════════
 
+def _student_out(student: Student) -> StudentOut:
+    return StudentOut(
+        id=student.id,
+        name=student.name,
+        grade=student.grade,
+        course_id=student.course_id,
+        cognitive_tier=student.cognitive_tier,
+        comment_draft=student.comment_draft or "",
+        feishu_open_id=student.feishu_open_id or "",
+        comment_delivery_status=student.comment_delivery_status or "not_sent",
+        comment_delivery_error=student.comment_delivery_error or "",
+        comment_delivered_at=student.comment_delivered_at,
+    )
+
+
+def _reset_comment_delivery(student: Student) -> None:
+    """A changed draft must be explicitly sent and tracked as a new delivery."""
+    student.comment_delivery_status = "not_sent"
+    student.comment_delivery_hash = ""
+    student.comment_delivery_error = ""
+    student.comment_delivered_at = None
+
 @app.get("/api/courses/{cid}/students", response_model=list[StudentOut])
 def list_students(cid: int, db: Session = Depends(get_db)):
     students = db.query(Student).filter(Student.course_id == cid).all()
-    result = []
-    for s in students:
-        result.append(StudentOut(
-            id=s.id, name=s.name, grade=s.grade,
-            course_id=s.course_id, cognitive_tier=s.cognitive_tier,
-            comment_draft=s.comment_draft or "",
-        ))
-    return result
+    return [_student_out(student) for student in students]
 
 
 @app.post("/api/courses/{cid}/students", response_model=StudentOut)
 def create_student(cid: int, body: StudentCreate, db: Session = Depends(get_db)):
     if not db.query(Course).get(cid):
         raise HTTPException(404, "Course not found")
-    s = Student(course_id=cid, name=body.name, grade=body.grade)
+    feishu_open_id = body.feishu_open_id.strip()
+    if feishu_open_id and not feishu_open_id.startswith("ou_"):
+        raise HTTPException(400, "飞书 open_id 格式不正确，应以 ou_ 开头")
+    s = Student(
+        course_id=cid,
+        name=body.name,
+        grade=body.grade,
+        feishu_open_id=feishu_open_id,
+    )
     db.add(s)
     db.commit()
     db.refresh(s)
-    return StudentOut(
-        id=s.id, name=s.name, grade=s.grade,
-        course_id=s.course_id, cognitive_tier=s.cognitive_tier,
-        comment_draft=s.comment_draft or "",
-    )
+    return _student_out(s)
 
 
 @app.post("/api/courses/{cid}/students/batch", response_model=dict)
@@ -558,16 +578,20 @@ def create_students_batch(cid: int, body: StudentBatchCreate, db: Session = Depe
         if existing:
             skipped.append(existing.name)
             continue
-        st = Student(course_id=cid, name=name, grade=item.grade)
+        feishu_open_id = item.feishu_open_id.strip()
+        if feishu_open_id and not feishu_open_id.startswith("ou_"):
+            raise HTTPException(
+                400, f"{name} 的飞书 open_id 格式不正确，应以 ou_ 开头"
+            )
+        st = Student(
+            course_id=cid,
+            name=name,
+            grade=item.grade,
+            feishu_open_id=feishu_open_id,
+        )
         db.add(st)
         db.flush()
-        created.append(
-            StudentOut(
-                id=st.id, name=st.name, grade=st.grade,
-                course_id=st.course_id, cognitive_tier=st.cognitive_tier,
-                comment_draft="",
-            )
-        )
+        created.append(_student_out(st))
     db.commit()
     return {"created": created, "skipped": skipped}
 
@@ -581,13 +605,16 @@ def update_student(sid: int, body: StudentUpdate, db: Session = Depends(get_db))
         s.name = body.name.strip()
     if body.grade is not None:
         s.grade = body.grade
+    if body.feishu_open_id is not None:
+        feishu_open_id = body.feishu_open_id.strip()
+        if feishu_open_id and not feishu_open_id.startswith("ou_"):
+            raise HTTPException(400, "飞书 open_id 格式不正确，应以 ou_ 开头")
+        if feishu_open_id != (s.feishu_open_id or ""):
+            s.feishu_open_id = feishu_open_id
+            _reset_comment_delivery(s)
     db.commit()
     db.refresh(s)
-    return StudentOut(
-        id=s.id, name=s.name, grade=s.grade,
-        course_id=s.course_id, cognitive_tier=s.cognitive_tier,
-        comment_draft=s.comment_draft or "",
-    )
+    return _student_out(s)
 
 
 @app.delete("/api/students/{sid}")
@@ -1451,8 +1478,10 @@ async def generate_comment(cid: int, body: CommentRequest, db: Session = Depends
         # Fallback to template if LLM fails
         draft = _fallback_comment(student, topic_data, dim_labels)
 
-    # Auto-save the draft
-    student.comment_draft = draft
+    # Auto-save the draft. A changed comment is a new delivery item.
+    if draft != (student.comment_draft or ""):
+        student.comment_draft = draft
+        _reset_comment_delivery(student)
     db.commit()
 
     return CommentOut(draft=draft)
@@ -1501,7 +1530,9 @@ def save_comment_draft(cid: int, body: CommentSaveRequest, db: Session = Depends
     student = db.query(Student).get(body.student_id)
     if not student or student.course_id != cid:
         raise HTTPException(404, "Student not found")
-    student.comment_draft = body.draft
+    if body.draft != (student.comment_draft or ""):
+        student.comment_draft = body.draft
+        _reset_comment_delivery(student)
     db.commit()
     return {"ok": True, "student_id": body.student_id}
 
@@ -1517,7 +1548,10 @@ async def send_comment(
         raise HTTPException(404, "Student not found")
     if not body.draft.strip():
         raise HTTPException(400, "Comment draft is empty")
-    student.comment_draft = body.draft.strip()
+    final_draft = body.draft.strip()
+    if final_draft != (student.comment_draft or ""):
+        student.comment_draft = final_draft
+        _reset_comment_delivery(student)
     db.commit()
 
     status = "saved_pending_delivery"
@@ -1543,6 +1577,9 @@ async def send_comment(
                 course_id=cid,
                 student_id=student.id,
                 response_id=main_resp.id if main_resp else 0,
+                comment_hash=hashlib.sha256(
+                    body.draft.strip().encode("utf-8")
+                ).hexdigest(),
                 change_url=f"{config.web_base_url}/?tab=comments",
             )
             await BotService(feishu_client).send_card(config.teacher_open_id, card)
@@ -1687,7 +1724,9 @@ async def batch_generate_comments(cid: int, db: Session = Depends(get_db)):
             )
             draft = draft.strip()
             # Auto-save the draft
-            student.comment_draft = draft
+            if draft != (student.comment_draft or ""):
+                student.comment_draft = draft
+                _reset_comment_delivery(student)
             db.commit()
             results.append({
                 "student_id": student.id,
