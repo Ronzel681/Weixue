@@ -613,7 +613,13 @@ class BitableSyncer:
             if remote_hash == binding.last_synced_hash:
                 counters["unchanged"] += 1
                 continue
-            student.comment_draft = normalized["评语草稿"]
+            remote_draft = normalized["评语草稿"]
+            if remote_draft != (student.comment_draft or ""):
+                student.comment_draft = remote_draft
+                student.comment_delivery_status = "not_sent"
+                student.comment_delivery_hash = ""
+                student.comment_delivery_error = ""
+                student.comment_delivered_at = None
             binding.last_synced_hash = remote_hash
             binding.last_synced_at = datetime.utcnow()
             counters["updated"] += 1

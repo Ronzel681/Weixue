@@ -63,11 +63,12 @@ class StudentBase(BaseModel):
     grade: int
 
 class StudentCreate(StudentBase):
-    pass
+    feishu_open_id: str = ""
 
 class StudentUpdate(BaseModel):
     name: Optional[str] = None
     grade: Optional[int] = None
+    feishu_open_id: Optional[str] = None
 
 class StudentBatchCreate(BaseModel):
     students: list[StudentCreate] = Field(default_factory=list)
@@ -77,6 +78,10 @@ class StudentOut(StudentBase):
     course_id: int
     cognitive_tier: str = ""
     comment_draft: str = ""
+    feishu_open_id: str = ""
+    comment_delivery_status: str = "not_sent"
+    comment_delivery_error: str = ""
+    comment_delivered_at: Optional[datetime] = None
     class Config:
         from_attributes = True
 
