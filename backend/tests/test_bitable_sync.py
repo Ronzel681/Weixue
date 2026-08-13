@@ -22,6 +22,7 @@ from database import (
     Student,
     StudentResponse,
     SessionLocal,
+    init_db,
 )
 from feishu.bitable import (
     BitableService,
