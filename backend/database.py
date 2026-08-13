@@ -312,12 +312,13 @@ class PrepPlan(Base):
 
 
 class FeishuBinding(Base):
-    """Maps a local entity to a Feishu Bitable record (one-way sync).
+    """Maps a local entity to a Feishu Bitable record (two-way sync).
 
     Kept on the local side so that subsequent syncs can batch_update the
-    same remote row instead of creating duplicates. entity_type is one of
-    course / topic / student / response; table_key matches the Bitable
-    table names used in FEISHU_BITABLE_TABLE_IDS.
+    same remote row instead of creating duplicates, and so that pull-back
+    can tell remote edits apart from our own pushes via last_synced_hash.
+    entity_type is one of course / topic / student / response / prep_plan;
+    table_key matches the Bitable table names used in FEISHU_BITABLE_TABLE_IDS.
     """
 
     __tablename__ = "feishu_bindings"
@@ -327,6 +328,10 @@ class FeishuBinding(Base):
     entity_id = Column(Integer, nullable=False)
     table_key = Column(String(30), nullable=False)
     remote_record_id = Column(String(120), nullable=False)
+    # Two-way sync snapshot: hash of the teacher-owned fields as last seen,
+    # used to detect remote edits without replaying our own pushes.
+    last_synced_hash = Column(String(64), default="", nullable=False, server_default="")
+    last_synced_at = Column(DateTime, nullable=True)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
@@ -374,4 +379,13 @@ def _migrate():
         }
         if "summary" not in prep_cols:
             conn.execute(text("ALTER TABLE prep_plans ADD COLUMN summary JSON"))
+        binding_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(feishu_bindings)"))
+        }
+        if "last_synced_hash" not in binding_cols:
+            conn.execute(text(
+                "ALTER TABLE feishu_bindings ADD COLUMN last_synced_hash VARCHAR(64) DEFAULT '' NOT NULL"
+            ))
+        if "last_synced_at" not in binding_cols:
+            conn.execute(text("ALTER TABLE feishu_bindings ADD COLUMN last_synced_at DATETIME"))
         conn.commit()

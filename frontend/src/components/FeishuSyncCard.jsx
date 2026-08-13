@@ -14,6 +14,7 @@ export default function FeishuSyncCard({ courseId }) {
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const [syncResult, setSyncResult] = useState('');
 
   const refresh = useCallback(async () => {
@@ -41,6 +42,32 @@ export default function FeishuSyncCard({ courseId }) {
     setSyncing(false);
   };
 
+  const runPull = async () => {
+    setPulling(true);
+    setSyncResult('');
+    try {
+      const r = await api.pullFeishuBitable(courseId);
+      if (!r || r.configured === false) {
+        setSyncResult(`导入跳过：${r?.message || '多维表格未配置'}`);
+      } else if (r.error) {
+        setSyncResult(`导入失败：${r.error}`);
+      } else {
+        const resp = r.tables?.responses || {};
+        const stud = r.tables?.students || {};
+        const parts = [
+          `作答更新 ${resp.updated ?? 0} 条（无变化 ${resp.unchanged ?? 0}）`,
+          `评语草稿更新 ${stud.updated ?? 0} 条`,
+        ];
+        if (r.unmatched_remote) parts.push(`未匹配远端行 ${r.unmatched_remote}（未自动创建）`);
+        setSyncResult(`从表格导入完成：${parts.join('，')}`);
+      }
+      refresh();
+    } catch (e) {
+      setSyncResult(`导入失败：${e?.response?.data?.detail || e?.message || '未知错误'}`);
+    }
+    setPulling(false);
+  };
+
   const ready = status?.mode === 'ready';
   const bindings = status?.bindings || {};
   return (
@@ -55,11 +82,21 @@ export default function FeishuSyncCard({ courseId }) {
         <div className="ml-auto flex items-center gap-1.5">
           <button
             onClick={runSync}
-            disabled={syncing || !ready}
+            disabled={syncing || pulling || !ready}
+            title="把本地课程数据推送到多维表格"
             className={`text-[11px] px-2.5 py-1 rounded-md border font-medium transition-colors cursor-pointer
               ${ready ? 'border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50' : 'border-slate-200 bg-white text-slate-400 cursor-not-allowed'}`}
           >
             {syncing ? '同步中...' : '同步'}
+          </button>
+          <button
+            onClick={runPull}
+            disabled={pulling || syncing || !ready}
+            title="教师在多维表格中改的评分/标签/批注/评语草稿写回本地"
+            className={`text-[11px] px-2.5 py-1 rounded-md border font-medium transition-colors cursor-pointer
+              ${ready ? 'border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50' : 'border-slate-200 bg-white text-slate-400 cursor-not-allowed'}`}
+          >
+            {pulling ? '导入中...' : '从表格导入'}
           </button>
           <button
             onClick={() => setOpen(!open)}

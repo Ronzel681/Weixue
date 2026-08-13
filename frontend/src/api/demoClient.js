@@ -776,3 +776,10 @@ export const syncFeishuBitable = () => ok({
   skipped: 0,
   errors: [],
 });
+
+export const pullFeishuBitable = () => ok({
+  configured: false,
+  mode: 'deferred',
+  tables: {},
+  unmatched_remote: 0,
+});
