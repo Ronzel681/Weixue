@@ -318,7 +318,18 @@ class BitableSyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(calls["create"]), 4)  # no duplicates
             self.assertEqual(len(calls["update"]), 4)  # all entities updated
 
-            bindings = db.query(FeishuBinding).all()
+            # Count only this course's bindings: the suite shares one DB and
+            # other test classes accumulate bindings of their own.
+            entities = {("course", course_id)}
+            entities |= {("topic", t.id) for t in db.query(DebateTopic).filter_by(course_id=course_id)}
+            entities |= {("student", s.id) for s in db.query(Student).filter_by(course_id=course_id)}
+            entities |= {
+                ("response", r.id)
+                for r in db.query(StudentResponse).join(Student).filter(Student.course_id == course_id)
+            }
+            bindings = [
+                b for b in db.query(FeishuBinding).all() if (b.entity_type, b.entity_id) in entities
+            ]
             self.assertEqual(len(bindings), 4)
             self.assertTrue(all(b.remote_record_id for b in bindings))
         finally:

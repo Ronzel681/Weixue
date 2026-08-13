@@ -380,6 +380,10 @@ def _migrate():
             conn.execute(text("ALTER TABLE student_responses ADD COLUMN processing_status VARCHAR(20) DEFAULT 'not_started'"))
         if "teacher_rating" not in cols:
             conn.execute(text("ALTER TABLE student_responses ADD COLUMN teacher_rating VARCHAR(20) DEFAULT ''"))
+        if "ai_bonus_flags" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN ai_bonus_flags JSON DEFAULT '[]'"))
+        if "dialogue_finished" not in cols:
+            conn.execute(text("ALTER TABLE student_responses ADD COLUMN dialogue_finished VARCHAR(20)"))
         prep_cols = {
             row[1] for row in conn.execute(text("PRAGMA table_info(prep_plans)"))
         }
