@@ -23,6 +23,12 @@ from database import (
     StudentResponse,
     SessionLocal,
 )
+from feishu.bitable import (
+    BitableService,
+    SINGLE_SELECT_OPTIONS,
+    TABLE_PREP_PLANS,
+    TABLE_RESPONSES,
+)
 from feishu.client import FeishuClient, FeishuConfig
 
 # feishu.client's import runs load_dotenv on backend/.env; purge any real
@@ -129,6 +135,41 @@ def _configured_client(calls: dict) -> tuple[FeishuClient, httpx.AsyncClient]:
             calls["update"].append(json.loads(request.content.decode()))
             return httpx.Response(
                 200, json={"code": 0, "msg": "success", "data": {"records": []}}
+            )
+        if request.url.path.endswith("/fields") and request.method == "GET":
+            table_id = request.url.path.split("/")[-2]
+            calls.setdefault("list_fields", []).append(table_id)
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "msg": "success",
+                    "data": {
+                        "items": calls.get("existing_fields", {}).get(table_id, []),
+                        "has_more": False,
+                    },
+                },
+            )
+        if request.url.path.endswith("/fields") and request.method == "POST":
+            payload = json.loads(request.content.decode())
+            calls.setdefault("create_field", []).append(
+                (request.url.path.split("/")[-2], payload)
+            )
+            return httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "msg": "success",
+                    "data": {"field": {"field_id": f"fld_new_{len(calls['create_field'])}"}},
+                },
+            )
+        if "/fields/" in request.url.path and request.method == "PUT":
+            payload = json.loads(request.content.decode())
+            calls.setdefault("update_field_options", []).append(
+                (request.url.path, payload)
+            )
+            return httpx.Response(
+                200, json={"code": 0, "msg": "success", "data": {"field": {}}}
             )
         return httpx.Response(
             404, json={"code": 99999, "msg": "unexpected path: " + request.url.path}
@@ -815,6 +856,127 @@ class BitablePullTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(db.get(FeishuBinding, binding.id))
         finally:
             db.close()
+            await http.aclose()
+
+
+class BitableSchemaBootstrapTests(unittest.IsolatedAsyncioTestCase):
+    """Schema bootstrap (field management) behavior against a mock API."""
+
+    ALL_TABLE_IDS = {
+        "courses": "tbl_courses",
+        "topics": "tbl_topics",
+        "students": "tbl_students",
+        "responses": "tbl_responses",
+        "prep_plans": "tbl_prep_plans",
+    }
+
+    @staticmethod
+    def _existing_fields_for(schema: dict) -> list[dict]:
+        fields = []
+        for name, ftype in schema.items():
+            field = {"field_id": f"fld_{name}", "field_name": name, "type": ftype}
+            if name in SINGLE_SELECT_OPTIONS:
+                field["property"] = {
+                    "options": [{"name": n} for n in SINGLE_SELECT_OPTIONS[name]]
+                }
+            fields.append(field)
+        return fields
+
+    def _service(self, calls, table_ids=None):
+        client, http = _configured_client(calls)
+        service = BitableService(
+            client, app_token="bascn_test", table_ids=table_ids or self.ALL_TABLE_IDS
+        )
+        return service, http
+
+    async def test_ensure_schema_covers_five_tables_and_creates_missing_fields(self):
+        calls = {"create": [], "update": [], "existing_fields": {}}
+        service, http = self._service(calls)
+        try:
+            report = await service.ensure_schema()
+            self.assertEqual(
+                set(report),
+                {"courses", "topics", "students", "responses", "prep_plans"},
+            )
+            self.assertTrue(all(v["status"] == "ok" for v in report.values()))
+
+            created_by_table: dict[str, list[dict]] = {}
+            for table_id, payload in calls.get("create_field", []):
+                created_by_table.setdefault(table_id, []).append(payload)
+            # Empty tables → every schema field created, prep_plans included.
+            self.assertEqual(
+                len(created_by_table["tbl_prep_plans"]), len(TABLE_PREP_PLANS)
+            )
+            self.assertEqual(
+                len(created_by_table["tbl_responses"]), len(TABLE_RESPONSES)
+            )
+            by_name = {p["field_name"]: p for p in created_by_table["tbl_responses"]}
+            self.assertIn("班级", by_name)
+            # Single-select fields carry their option list on create...
+            self.assertEqual(by_name["状态"]["type"], 3)
+            self.assertEqual(
+                [o["name"] for o in by_name["状态"]["property"]["options"]],
+                SINGLE_SELECT_OPTIONS["状态"],
+            )
+            # ...plain text fields get no property payload.
+            self.assertEqual(by_name["原始文本"]["type"], 1)
+            self.assertNotIn("property", by_name["原始文本"])
+        finally:
+            await http.aclose()
+
+    async def test_ensure_schema_preserves_teacher_custom_options(self):
+        existing = self._existing_fields_for(TABLE_RESPONSES)
+        source = next(f for f in existing if f["field_name"] == "来源")
+        # Teacher added a custom option in the console; 音频转写 is still missing.
+        source["property"] = {
+            "options": [{"name": "手动录入"}, {"name": "教师自定义"}]
+        }
+        calls = {
+            "create": [],
+            "update": [],
+            "existing_fields": {"tbl_responses": existing},
+        }
+        service, http = self._service(calls, table_ids={"responses": "tbl_responses"})
+        try:
+            report = await service.ensure_schema()
+            self.assertEqual(report["responses"]["created_fields"], [])
+            self.assertEqual(report["responses"]["updated_options"], ["来源"])
+            self.assertEqual(len(calls["update_field_options"]), 1)
+            path, payload = calls["update_field_options"][0]
+            self.assertTrue(path.endswith("/fields/fld_来源"))
+            # PUT /fields/{id} requires field_name and type in the body.
+            self.assertEqual(payload["field_name"], "来源")
+            self.assertEqual(payload["type"], 3)
+            names = [o["name"] for o in payload["property"]["options"]]
+            # Union, existing order first: the custom option must survive.
+            self.assertEqual(names, ["手动录入", "教师自定义", "音频转写"])
+        finally:
+            await http.aclose()
+
+    async def test_ensure_schema_is_noop_when_complete(self):
+        from feishu.bitable import TABLE_COURSES, TABLE_STUDENTS, TABLE_TOPICS
+
+        calls = {
+            "create": [],
+            "update": [],
+            "existing_fields": {
+                "tbl_courses": self._existing_fields_for(TABLE_COURSES),
+                "tbl_topics": self._existing_fields_for(TABLE_TOPICS),
+                "tbl_students": self._existing_fields_for(TABLE_STUDENTS),
+                "tbl_responses": self._existing_fields_for(TABLE_RESPONSES),
+                "tbl_prep_plans": self._existing_fields_for(TABLE_PREP_PLANS),
+            },
+        }
+        service, http = self._service(calls)
+        try:
+            report = await service.ensure_schema()
+            self.assertTrue(all(v["status"] == "ok" for v in report.values()))
+            self.assertEqual(calls.get("create_field"), None)
+            self.assertEqual(calls.get("update_field_options"), None)
+            for table_report in report.values():
+                self.assertEqual(table_report["created_fields"], [])
+                self.assertEqual(table_report["updated_options"], [])
+        finally:
             await http.aclose()
 
 
