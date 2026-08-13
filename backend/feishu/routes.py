@@ -4,6 +4,7 @@ Endpoints:
 - GET  /api/feishu/health              - config status (no secrets)
 - GET  /api/feishu/bitable/status      - Bitable config + binding counts
 - POST /api/feishu/bitable/sync        - manual one-way sync of a course
+- POST /api/feishu/bitable/pull        - manual pull of teacher edits back
 - POST /api/feishu/minutes/import      - accept audio, upload + create minute (M2)
 - GET  /api/feishu/minutes/{token}/status - poll transcript, store raw_text (M2)
 - POST /api/feishu/events              - event subscription callback (M4)
@@ -146,6 +147,25 @@ async def bitable_sync(body: dict, db: Session = Depends(get_db)):
         raise HTTPException(400, "course_id is required")
     syncer = BitableSyncer(get_client(), _feishu_config)
     return await syncer.sync_course(db, course_id)
+
+
+@router.post("/bitable/pull")
+async def bitable_pull(body: dict, db: Session = Depends(get_db)):
+    """Manually pull teacher-owned edits (教师评分/标签/批注/状态, 评语草稿)
+    from Bitable back into the local DB for one course."""
+    if not bitable_is_configured(_feishu_config):
+        raise HTTPException(
+            503,
+            "FEISHU_BITABLE_APP_TOKEN / FEISHU_BITABLE_TABLE_IDS not configured",
+        )
+    try:
+        course_id = int(body.get("course_id") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "course_id must be an integer")
+    if course_id <= 0:
+        raise HTTPException(400, "course_id is required")
+    syncer = BitableSyncer(get_client(), _feishu_config)
+    return await syncer.pull_course(db, course_id)
 
 
 @router.post("/minutes/import")

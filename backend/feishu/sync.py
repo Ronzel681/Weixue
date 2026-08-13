@@ -1,10 +1,18 @@
-"""One-way sync of local assessment data into Feishu Bitable (多维表格).
+"""Two-way sync between local assessment data and Feishu Bitable (多维表格).
 
-Design (MVP, 单向同步):
-- Local SQLite is the single source of truth; Bitable is a display/review
-  surface only.
+Design:
+- Local SQLite stays the source of truth for content/AI fields; Bitable is
+  the display & review surface. Push (sync_course / sync_response) writes
+  local state up; pull (pull_course) imports teacher-owned edits back.
 - ``FeishuBinding`` stores the local entity -> remote record_id mapping so
-  that repeated syncs use batch_update instead of creating duplicates.
+  that repeated syncs use batch_update instead of creating duplicates, and
+  keeps a ``last_synced_hash`` snapshot of the teacher-owned fields so pull
+  can tell real remote edits apart from echoes of our own pushes.
+- Field ownership (responses table): backend owns 原始/清洗文本、AI* 列、
+  来源、更新时间; teachers own 教师评分 / 教师标签 / 教师批注 / 状态. Pull
+  only ever reads the teacher-owned columns, and only moves 状态 towards
+  教师已审 (never un-reviews). Remote rows without a local binding are
+  reported as unmatched, never auto-created.
 - Every sync is guarded: missing credentials or API errors never break the
   assessment flow. Failures are reported in the returned summary and are
   visible via GET /api/feishu/bitable/status.
@@ -22,6 +30,8 @@ Feishu console prerequisites (build these tables before first sync):
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -63,6 +73,14 @@ _CONFIDENCE_LABELS = {
 }
 _STATUS_LABELS = {"pending": "待评估", "assessed": "AI已评", "reviewed": "教师已审"}
 
+# Teacher-owned columns per table: the only fields pull() reads back. Backend
+# pushes them too, but remote changes between pushes are treated as teacher
+# edits (detected via FeishuBinding.last_synced_hash).
+TEACHER_FIELDS_BY_TABLE = {
+    "responses": ("教师评分", "教师标签", "教师批注", "状态"),
+    "students": ("评语草稿",),
+}
+
 
 # ── Pure record builders (testable without a Feishu connection) ─────────
 
@@ -90,6 +108,71 @@ _DIM_LABELS = {
     "position": "立意", "material": "选材", "structure": "结构",
     "language": "语言", "perspective": "视角",
 }
+_DIM_LABELS_INV = {v: k for k, v in _DIM_LABELS.items()}
+
+
+# ── Pull-side helpers (pure, testable without a Feishu connection) ──────
+
+def _field_str(value) -> str:
+    """Read a remote field value back as a plain string, tolerating both the
+    plain-string shape we write and object/segment shapes some field types
+    return on read."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        return str(value.get("text") or "").strip()
+    if isinstance(value, list):
+        return "".join(_field_str(v) for v in value).strip()
+    return str(value)
+
+
+def _field_list(value) -> list[str]:
+    """Read a multi-select field back as a list of option-name strings."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [s for s in (_field_str(v) for v in value) if s]
+    text = _field_str(value)
+    return [text] if text else []
+
+
+def teacher_fields_hash(fields: dict, keys: tuple) -> str:
+    """Stable hash of the teacher-owned subset of a record's fields.
+
+    Both sides normalize through _field_str/_field_list before hashing, so a
+    push followed by a pull of unchanged remote data hashes identically
+    (echo suppression).
+    """
+    subset = {}
+    for key in keys:
+        raw = fields.get(key)
+        if key in ("教师标签",):
+            subset[key] = _field_list(raw)
+        else:
+            subset[key] = _field_str(raw)
+    payload = json.dumps(subset, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _parse_score_summary(text: str) -> dict:
+    """Parse a pushed 教师评分 summary like '立意:A；选材:B+' back into
+    {'position': 'A', 'material': 'B+'}. Unknown labels are kept verbatim;
+    malformed segments are skipped."""
+    scores: dict = {}
+    for part in (text or "").replace(";", "；").split("；"):
+        part = part.strip()
+        if not part:
+            continue
+        for sep in (":", "："):
+            if sep in part:
+                label, _, grade = part.partition(sep)
+                label, grade = label.strip(), grade.strip()
+                if label and grade:
+                    scores[_DIM_LABELS_INV.get(label, label)] = grade
+                break
+    return scores
 
 
 def _format_scores(scores) -> str:
@@ -235,6 +318,18 @@ class BitableSyncer:
     def _table_id(self, key: str) -> str:
         return (self.config.bitable_table_ids or {}).get(key, "")
 
+    def _snapshot_binding(
+        self, db: Session, binding: FeishuBinding, table_key: str, record: dict
+    ) -> None:
+        """Store the teacher-field hash we just pushed, so a later pull treats
+        this exact remote state as 'already synced' (echo suppression)."""
+        keys = TEACHER_FIELDS_BY_TABLE.get(table_key)
+        if not keys:
+            return
+        binding.last_synced_hash = teacher_fields_hash(record.get("fields") or {}, keys)
+        binding.last_synced_at = datetime.utcnow()
+        db.commit()
+
     async def _upsert(
         self,
         db: Session,
@@ -262,6 +357,7 @@ class BitableSyncer:
                     table_id,
                     [{"record_id": binding.remote_record_id, **record}],
                 )
+                self._snapshot_binding(db, binding, table_key, record)
                 return {"status": "updated"}
 
             data = await self.service.batch_create_records(table_id, [record])
@@ -278,6 +374,7 @@ class BitableSyncer:
                 db.add(binding)
             binding.remote_record_id = remote_id
             db.commit()
+            self._snapshot_binding(db, binding, table_key, record)
             return {"status": "created"}
         except Exception as exc:  # noqa: BLE001 - sync must never break the main flow
             db.rollback()
@@ -392,4 +489,160 @@ class BitableSyncer:
             build_response_record(resp, resp.student, resp.topic),
             summary,
         )
+        return summary
+
+    # ── Pull: import teacher edits from Bitable back into the local DB ──
+
+    async def _iter_remote_records(self, table_id: str):
+        """Yield all records of a table, following search pagination."""
+        page_token = ""
+        while True:
+            data = await self.service.search_records(
+                table_id, page_size=500, page_token=page_token
+            )
+            data = data or {}
+            for item in data.get("items") or []:
+                yield item
+            if not data.get("has_more"):
+                break
+            page_token = data.get("page_token") or ""
+            if not page_token:
+                break
+
+    async def _pull_responses(self, db: Session, course_id: int, summary: dict) -> None:
+        table_id = self._table_id("responses")
+        keys = TEACHER_FIELDS_BY_TABLE["responses"]
+        counters = summary["tables"]["responses"]
+
+        responses = (
+            db.query(StudentResponse)
+            .join(Student, StudentResponse.student_id == Student.id)
+            .filter(Student.course_id == course_id)
+            .all()
+        )
+        if not responses:
+            return
+        by_entity = {r.id: r for r in responses}
+        bindings = (
+            db.query(FeishuBinding)
+            .filter(
+                FeishuBinding.entity_type == "response",
+                FeishuBinding.table_key == "responses",
+                FeishuBinding.entity_id.in_(list(by_entity)),
+            )
+            .all()
+        )
+        remote_map = {b.remote_record_id: (b, by_entity[b.entity_id]) for b in bindings}
+
+        async for record in self._iter_remote_records(table_id):
+            remote_id = str(record.get("record_id") or "")
+            fields = record.get("fields") or {}
+            match = remote_map.get(remote_id)
+            if match is None:
+                summary["unmatched_remote"] += 1
+                continue
+            binding, resp = match
+            counters["checked"] += 1
+            normalized = {
+                "教师评分": _field_str(fields.get("教师评分")),
+                "教师标签": _field_list(fields.get("教师标签")),
+                "教师批注": _field_str(fields.get("教师批注")),
+                "状态": _field_str(fields.get("状态")),
+            }
+            remote_hash = teacher_fields_hash(normalized, keys)
+            if not (binding.last_synced_hash or ""):
+                # Pre-two-way binding with no baseline: adopt the current
+                # remote state as the baseline instead of applying it, so an
+                # empty/stale remote can't wipe locally-entered reviews.
+                binding.last_synced_hash = remote_hash
+                binding.last_synced_at = datetime.utcnow()
+                counters["unchanged"] += 1
+                continue
+            if remote_hash == binding.last_synced_hash:
+                counters["unchanged"] += 1
+                continue
+            resp.teacher_note = normalized["教师批注"]
+            resp.teacher_tags = normalized["教师标签"]
+            resp.teacher_dimension_scores = _parse_score_summary(normalized["教师评分"])
+            # Safe direction only: a remote 状态 can move a response towards
+            # 教师已审 but never un-review an already-reviewed response.
+            if normalized["状态"] == _STATUS_LABELS["reviewed"]:
+                resp.teacher_reviewed = True
+            binding.last_synced_hash = remote_hash
+            binding.last_synced_at = datetime.utcnow()
+            counters["updated"] += 1
+
+    async def _pull_students(self, db: Session, course_id: int, summary: dict) -> None:
+        table_id = self._table_id("students")
+        keys = TEACHER_FIELDS_BY_TABLE["students"]
+        counters = summary["tables"]["students"]
+
+        students = (
+            db.query(Student).filter(Student.course_id == course_id).all()
+        )
+        if not students:
+            return
+        by_entity = {s.id: s for s in students}
+        bindings = (
+            db.query(FeishuBinding)
+            .filter(
+                FeishuBinding.entity_type == "student",
+                FeishuBinding.table_key == "students",
+                FeishuBinding.entity_id.in_(list(by_entity)),
+            )
+            .all()
+        )
+        remote_map = {b.remote_record_id: (b, by_entity[b.entity_id]) for b in bindings}
+
+        async for record in self._iter_remote_records(table_id):
+            remote_id = str(record.get("record_id") or "")
+            fields = record.get("fields") or {}
+            match = remote_map.get(remote_id)
+            if match is None:
+                summary["unmatched_remote"] += 1
+                continue
+            binding, student = match
+            counters["checked"] += 1
+            normalized = {"评语草稿": _field_str(fields.get("评语草稿"))}
+            remote_hash = teacher_fields_hash(normalized, keys)
+            if not (binding.last_synced_hash or ""):
+                binding.last_synced_hash = remote_hash
+                binding.last_synced_at = datetime.utcnow()
+                counters["unchanged"] += 1
+                continue
+            if remote_hash == binding.last_synced_hash:
+                counters["unchanged"] += 1
+                continue
+            student.comment_draft = normalized["评语草稿"]
+            binding.last_synced_hash = remote_hash
+            binding.last_synced_at = datetime.utcnow()
+            counters["updated"] += 1
+
+    async def pull_course(self, db: Session, course_id: int) -> dict:
+        """Pull teacher-owned edits (教师评分/标签/批注/状态, 评语草稿) from
+        Bitable back into the local DB for one course. Manual trigger only;
+        remote rows without a local binding are counted, never auto-created."""
+        if not self.available:
+            return {"configured": False, "mode": "deferred", "tables": {}}
+        course = db.get(Course, course_id)
+        if not course:
+            return {"configured": True, "error": "course not found"}
+        summary = {
+            "configured": True,
+            "direction": "pull",
+            "tables": {
+                key: {"checked": 0, "updated": 0, "unchanged": 0}
+                for key in ("responses", "students")
+            },
+            "unmatched_remote": 0,
+        }
+        try:
+            if self._table_id("responses"):
+                await self._pull_responses(db, course_id, summary)
+            if self._table_id("students"):
+                await self._pull_students(db, course_id, summary)
+            db.commit()
+        except Exception as exc:  # noqa: BLE001 - pull must never break the app
+            db.rollback()
+            summary["error"] = str(exc)
         return summary

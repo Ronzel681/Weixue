@@ -340,5 +340,10 @@ export const syncFeishuBitable = async (...a) => {
   return demo ? demo.syncFeishuBitable(...a) :
     api.post('/feishu/bitable/sync', { course_id: a[0] }).then(r => r.data);
 };
+export const pullFeishuBitable = async (...a) => {
+  const demo = await _demoImpl();
+  return demo ? demo.pullFeishuBitable(...a) :
+    api.post('/feishu/bitable/pull', { course_id: a[0] }).then(r => r.data);
+};
 
 export default api;
