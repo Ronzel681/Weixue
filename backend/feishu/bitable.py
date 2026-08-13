@@ -54,6 +54,9 @@ TABLE_STUDENTS = {
 TABLE_RESPONSES = {
     "学生": FIELD_TEXT,
     "辩题": FIELD_TEXT,
+    # Course identifier so pull can filter rows per course (review issue 1);
+    # without it a per-course pull would scan the whole shared table.
+    "班级": FIELD_TEXT,
     "来源": FIELD_SINGLE_SELECT,
     "原始文本": FIELD_TEXT,
     "清洗文本": FIELD_TEXT,
